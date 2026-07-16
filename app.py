@@ -1,11 +1,11 @@
 import os
 import urllib.parse
-from flask import Flask, render_template_string, request, redirect, flash, url_for
+from flask import Flask, render_template_string, request, redirect, flash, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = 'slns_secret_key_2026'
+app.secret_key = "slns_secret_admin_key"
 
 # 1. డేటాబేస్ కాన్ఫిగరేషన్
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///slns_services.db'
@@ -405,8 +405,53 @@ def submit_feedback():
     db.session.commit()
     flash("Thank you for your valuable feedback rating!")
     return redirect(url_for('index'))
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
 
+        # ఇక్కడ మీ యూజర్‌నేమ్ మరియు పాస్‌వర్డ్ సెట్ చేసుకోండి
+        if username == 'admin' and password == 'Ravi@123':
+            session['logged_in'] = True
+            flash('Successfully logged in!')
+            return redirect(url_for('dashboard'))
+        else:
+            flash('Invalid credentials, please try again.')
+
+    return render_template_string('''
+        <div style="max-width: 400px; margin: 100px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; font-family: Arial;">
+            <h2>SLNS Admin Login</h2>
+            <form method="POST">
+                <div style="margin-bottom: 15px;">
+                    <label>Username:</label><br>
+                    <input type="text" name="username" required style="width: 100%; padding: 8px; margin-top: 5px;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label>Password:</label><br>
+                    <input type="password" name="password" required style="width: 100%; padding: 8px; margin-top: 5px;">
+                </div>
+                <button type="submit" style="background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer;">Login</button>
+            </form>
+        </div>
+    ''')
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    flash('Logged out successfully.')
+    return redirect(url_for('login'))
 @app.route('/dashboard')
+@app.route('/dashboard')
+def dashboard():
+    # లాగిన్ చెక్
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    pans = PanApplication.query.order_by(PanApplication.timestamp.desc()).all()
+    addresses = AddressUpdateApplication.query.order_by(AddressUpdateApplication.timestamp.desc()).all()
+    full_html = HTML_HEADER + DASHBOARD_CONTENT + HTML_FOOTER
+    return render_template_string(full_html, pans=pans, addresses=addresses)
 def dashboard():
     pans = PanApplication.query.order_by(PanApplication.timestamp.desc()).all()
     addresses = AddressUpdateApplication.query.order_by(AddressUpdateApplication.timestamp.desc()).all()
