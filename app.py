@@ -1,7 +1,7 @@
 import os
 import re
 import urllib.request
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from flask import Flask, render_template_string, request, redirect, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
@@ -88,13 +88,31 @@ class LifeInsuranceRequest(db.Model):
     coverage_amount = db.Column(db.String(50), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
+class VisitorLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    ip_address = db.Column(db.String(50))
+    visit_date = db.Column(db.Date, default=date.today)
+    visit_month = db.Column(db.String(7), default=lambda: datetime.now().strftime('%Y-%m'))
+
+# 📋 జాబ్ నోటిఫికేషన్స్ కొరకు ప్రత్యేక టేబుల్ (డేట్ & టైమ్ ట్రాకింగ్ కొరకు)
+class JobNotification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(50), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    text = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
 # ----------------------------------------
-# 🔍 టెలిగ్రామ్ డేటా స్క్రాపర్ & ఫిల్టర్ ఫంక్షన్
+# 🔍 టెలిగ్రామ్ డేటా సింక్, ఫిల్టర్ & ఆటో-డిలీట్ ఫంక్షన్
 # ----------------------------------------
-def get_clean_telegram_jobs():
+def sync_and_clean_jobs():
+    # 🛑 1. ఆటో-డిలీట్ రూల్: 45 రోజుల కంటే పాత నోటిఫికేషన్లను డేటాబేస్ నుండి తొలగించడం
+    time_threshold = datetime.now() - timedelta(days=45)
+    JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
+    db.session.commit()
+
+    # 📡 2. టెలిగ్రామ్ ఛానెల్స్ నుండి కొత్త సమాచారాన్ని సేకరించడం
     channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
-    clean_updates = []
-    job_id = 1
     
     for channel in channels:
         try:
@@ -114,24 +132,22 @@ def get_clean_telegram_jobs():
                 text = re.sub(r'https?://\S+|www\.\S+', '', text)
                 text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co)\b', '', text)
                 text = re.sub(r't\.me/\S+', '', text)
-                text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Information Protected]', text)
+                text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Protected]', text)
                 text = re.sub(r'\s+', ' ', text).strip()
                 
-                # మోడల్ పాప్-అప్ కోసం ఒక చిన్న టైటిల్ క్రియేట్ చేయడం
                 title = text[:45] + "..." if len(text) > 45 else text
                 
-                if text and text not in [j['text'] for j in clean_updates]:
-                    clean_updates.append({
-                        'id': job_id,
-                        'source': channel.upper(),
-                        'title': title,
-                        'text': text
-                    })
-                    job_id += 1
+                # డూప్లికేట్ కాకుండా చూసుకోవడం
+                existing = JobNotification.query.filter_by(text=text).first()
+                if not existing and text:
+                    new_job = JobNotification(source=channel.upper(), title=title, text=text)
+                    db.session.add(new_job)
+            db.session.commit()
         except Exception:
             continue
-            
-    return clean_updates[:12] # గరిష్టంగా 12 లేటెస్ట్ లింకులు చూపిస్తుంది
+
+    # 🔄 3. లేటెస్ట్ పోస్టింగ్స్ పైన వచ్చేలా అమర్చి పంపడం (Order by created_at DESC)
+    return JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
 
 # ----------------------------------------
 # 🎨 HTML లేఅవుట్ టెంప్లేట్స్ (UI Design)
@@ -154,7 +170,6 @@ HTML_HEADER = """
         .form-label { font-weight: 600; }
         .note-box { color: #b58900; background: #fff3cd; padding: 10px; border-radius: 5px; font-size: 14px; border-left: 4px solid #ffc107; }
         
-        /* 3-Column Layout: Left Menu | Content | Right Menu */
         .wrapper { display: flex; width: 100%; align-items: stretch; }
         
         #sidebar-left { min-width: 240px; max-width: 240px; background: linear-gradient(180deg, #0f2027, #203a43); color: #fff; min-height: calc(100vh - 56px); padding-top: 20px; box-shadow: 4px 0 10px rgba(0,0,0,0.1); }
@@ -162,7 +177,7 @@ HTML_HEADER = """
         #sidebar-left ul li a { padding: 12px 20px; font-size: 14px; display: block; color: rgba(255,255,255,0.8); text-decoration: none; transition: all 0.3s; font-weight: 500; }
         #sidebar-left ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
         
-        #sidebar-right { min-width: 280px; max-width: 280px; background: #fff; min-height: calc(100vh - 56px); padding: 20px 15px; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e2e8f0; }
+        #sidebar-right { min-width: 290px; max-width: 290px; background: #fff; min-height: calc(100vh - 56px); padding: 20px 12px; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e2e8f0; }
         #sidebar-right .job-link { display: block; padding: 10px 12px; margin-bottom: 8px; background: #f8fafc; border-left: 3px solid #ffc107; color: #334155; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13px; font-weight: 500; transition: all 0.2s; }
         #sidebar-right .job-link:hover { background: #fff3cd; color: #b45309; transform: translateX(3px); }
         
@@ -170,7 +185,14 @@ HTML_HEADER = """
         
         .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25d366; color: white; padding: 12px 20px; border-radius: 30px; font-weight: bold; text-decoration: none; box-shadow: 0 4px 10px rgba(0,0,0,0.2); z-index: 9999; }
         
-        .brand-logo-card { background: #fff; border-radius: 8px; padding: 12px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); font-weight: bold; color: #2c5364; border-bottom: 3px solid #203a43; font-size: 12px; }
+        .brand-logo-card {
+            background: #fff; border-radius: 8px; padding: 15px 10px; text-align: center; box-shadow: 0 4px 8px rgba(0,0,0,0.05); font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #e2e8f0; transition: all 0.3s;
+        }
+        .brand-logo-card:hover { transform: translateY(-4px); box-shadow: 0 6px 15px rgba(0,0,0,0.1); }
+
+        .visitor-counter-box {
+            background: linear-gradient(135deg, #0f2027, #203a43); color: #fff; padding: 15px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 14px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
 
         @media (max-width: 1200px) {
             .wrapper { flex-direction: column; }
@@ -196,7 +218,7 @@ HTML_HEADER = """
 </nav>
 
 <div class="wrapper">
-    <!-- 🗂️ ఎడమ వైపు మెనూ బార్ (Left Side Menu Bar) -->
+    <!-- 🗂️ ఎడమ వైపు మెనూ బార్ -->
     <nav id="sidebar-left">
         <div class="menu-header text-center">🏢 SLNS Services</div>
         <ul class="list-unstyled components m-0 p-0">
@@ -211,7 +233,7 @@ HTML_HEADER = """
         </ul>
     </nav>
 
-    <!-- 💻 మధ్యలో కంటెంట్ ఏరియా (Main Content Window) -->
+    <!-- 💻 మధ్యలో కంటెంట్ ఏరియా -->
     <div id="content">
         {% with messages = get_flashed_messages() %}
           {% if messages %}
@@ -228,39 +250,55 @@ HTML_HEADER = """
 HTML_FOOTER = """
     </div> <!-- content closing -->
 
-    <!-- 💼 కుడివైపు మెనూ బార్: జాబ్ నోటిఫికేషన్స్ లింకులు (Right Side Job Menu Bar) -->
+    <!-- 💼 కుడివైపు మెనూ బార్: జాబ్ నోటిఫికేషన్స్ లింకులు (Posting Time తో సహా) -->
     <nav id="sidebar-right">
         <h5 class="text-dark font-weight-bold mb-3 pb-2" style="border-bottom: 2px solid #ffc107;"><i class="fas fa-briefcase text-warning me-2"></i> Job Notifications</h5>
-        <p class="text-muted" style="font-size: 11px;">లింక్ క్లిక్ చేసి పూర్తి నోటిఫికేషన్ వివరాలు పాప్-అప్ విండోలో చూడండి.</p>
+        <p class="text-muted" style="font-size: 11px;">లేటెస్ట్ అప్‌డేట్స్ పైన ఉంటాయి. క్లిక్ చేసి పాప్-అప్ బాక్స్ లో పూర్తి వివరాలు చూడండి.</p>
         
         <div style="max-height: 650px; overflow-y: auto;">
             {% if job_updates %}
                 {% for job in job_updates %}
                     <a href="#" class="job-link" data-bs-toggle="modal" data-bs-target="#jobModal{{ job.id }}">
-                        <span class="badge bg-secondary text-white mb-1" style="font-size:9px;">{{ job.source }}</span><br>
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="badge bg-secondary text-white" style="font-size:9px;">{{ job.source }}</span>
+                            <span class="text-muted" style="font-size:10px;"><i class="far fa-clock"></i> {{ job.created_at.strftime('%d-%b %I:%M %p') }}</span>
+                        </div>
                         {{ job.title }}
                     </a>
                 {% endfor %}
             {% else %}
-                <p class="text-muted text-center style='font-size:12px;'"><i class="fas fa-sync fa-spin"></i> Loading updates...</p>
+                <p class="text-muted text-center" style="font-size:12px;"><i class="fas fa-sync fa-spin"></i> Loading updates...</p>
             {% endif %}
         </div>
     </nav>
 </div> <!-- wrapper closing -->
 
-<!-- 📑 ప్రతి జాబ్ లింక్ కోసం పాప్-అప్ విండోలు (Bootstrap Modals) -->
+<!-- 📑 ప్రతి జాబ్ లింక్ కోసం పాప్-అప్ విండోలు -->
 {% if job_updates %}
     {% for job in job_updates %}
     <div class="modal fade" id="jobModal{{ job.id }}" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-        <div class="modal-content">
+        <div class="modal-content text-dark">
           <div class="modal-header bg-light">
-            <h5 class="modal-title font-weight-bold text-dark">📢 {{ job.source }} Notification</h5>
+            <div>
+               <h5 class="modal-title font-weight-bold text-dark">📢 {{ job.source }} Update</h5>
+               <small class="text-muted">Posted on: {{ job.created_at.strftime('%d-%m-%Y %I:%M %p') }}</small>
+            </div>
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
-          <div class="modal-body text-dark" style="font-size: 14px; line-height: 1.6; white-space: pre-wrap;">{{ job.text }}</div>
-          <div class="modal-footer bg-light py-2">
-            <button type="button" class="btn btn-secondary btn-sm" data-bs-modal="dismiss" data-bs-dismiss="modal">Close Window</button>
+          <div class="modal-body" style="font-size: 14px; line-height: 1.6; white-space: pre-wrap;">{{ job.text }}</div>
+          
+          <!-- 💬 సంప్రదింపు సెక్షన్ -->
+          <div class="p-3 bg-light border-top text-center">
+             <h6 class="font-weight-bold text-secondary mb-2" style="font-size: 13px;">📞 ఈ ఉద్యోగానికి అప్లై చేయడానికి లేదా సమాచారం కోసం మమ్మల్ని సంప్రదించండి:</h6>
+             <div class="d-flex flex-wrap justify-content-center gap-2">
+                 <a href="https://wa.me/919390038979" target="_blank" class="btn btn-success btn-sm"><i class="fab fa-whatsapp me-1"></i> WhatsApp Help</a>
+                 <a href="https://t.me/pancsc" target="_blank" class="btn btn-info btn-sm text-white"><i class="fab fa-telegram-plane me-1"></i> Telegram Channel</a>
+             </div>
+          </div>
+          
+          <div class="modal-footer py-2">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close Window</button>
           </div>
         </div>
       </div>
@@ -473,7 +511,7 @@ INDEX_CONTENT = """
                     <select name="vehicle_type" class="form-select" required>
                         <option value="">-- Select Type --</option>
                         <option value="Two Wheeler">Two Wheeler (బైక్ / స్కూటర్)</option>
-                        <option value="Four Wheeler">Four Wheeler (కారు / ఆటో /饕్రాక్టర్)</option>
+                        <option value="Four Wheeler">Four Wheeler (కారు / ఆటో / ట్రాక్టర్)</option>
                     </select>
                 </div>
                 <div class="mb-3">
@@ -520,23 +558,37 @@ INDEX_CONTENT = """
     </div>
 </div>
 
-<!-- 🏢 TOP INSURANCE BRANDS LOGO SECTION -->
+<!-- 🏢 REALISTIC INSURANCE BRANDS LOGO SECTION -->
 <div class="row mt-5 mb-4">
     <div class="col-12 text-center mb-4">
         <h3 style="color: #2c5364; font-weight: 700; border-bottom: 3px solid #203a43; display: inline-block; padding-bottom: 10px;">🤝 Our Authorized Insurance Partners</h3>
     </div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🛡️ TATA AIA Life</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🚗 TATA AIG Gen</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">📈 Bajaj Allianz</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🩺 Niva Bupa</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🏠 HDFC ERGO</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🚙 ICICI Lombard</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">⭐ Star Health</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🏦 SBI General</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🏛️ Chola MS</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🏢 United India</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🤝 Universal Sompo</div></div>
-    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">💳 Axis Life</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #003366;"><i class="fas fa-shield-alt" style="color:#003366;"></i> TATA AIA Life</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #003366;"><i class="fas fa-car-crash" style="color:#003366;"></i> TATA AIG Gen</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #005ea6;"><i class="fas fa-chart-line" style="color:#005ea6;"></i> Bajaj Allianz</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #009639;"><i class="fas fa-user-md" style="color:#009639;"></i> Niva Bupa</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #004c8f;"><i class="fas fa-hotel" style="color:#004c8f;"></i> HDFC ERGO</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #f26522;"><i class="fas fa-ambulance" style="color:#f26522;"></i> ICICI Lombard</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #0a5697;"><i class="fas fa-star" style="color:#ffc107;"></i> Star Health</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #1a3668;"><i class="fas fa-university" style="color:#1a3668;"></i> SBI General</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #0072bc;"><i class="fas fa-industry" style="color:#0072bc;"></i> Chola MS</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #ce1126;"><i class="fas fa-building" style="color:#ce1126;"></i> United India</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #0b2f61;"><i class="fas fa-handshake" style="color:#0b2f61;"></i> Universal Sompo</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card" style="border-left: 4px solid #97144d;"><i class="fas fa-credit-card" style="color:#97144d;"></i> Axis Life</div></div>
+</div>
+
+<!-- 📊 LIVE VISITOR COUNTER SECTION -->
+<div class="row mt-4 mb-2 justify-content-center">
+    <div class="col-md-6">
+        <div class="visitor-counter-box">
+            <span>📊 SLNS Traffic Analytics Counter</span>
+            <div class="d-flex justify-content-around mt-2 pt-2" style="border-top: 1px solid rgba(255,255,255,0.2);">
+                <div>📅 Today Visitors: <span class="badge bg-warning text-dark px-2 py-1" style="font-size:15px;">{{ stats.today_count }}</span></div>
+                <div>🗓️ Current Month: <span class="badge bg-info text-white px-2 py-1" style="font-size:15px;">{{ stats.month_count }}</span></div>
+                <div>👥 Total Hits: <span class="badge bg-success text-white px-2 py-1" style="font-size:15px;">{{ stats.total_count }}</span></div>
+            </div>
+        </div>
+    </div>
 </div>
 """
 
@@ -546,8 +598,30 @@ INDEX_CONTENT = """
 
 @app.route('/')
 def index():
-    jobs = get_clean_telegram_jobs()
-    return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, job_updates=jobs)
+    # 📊 విజిటర్స్ ట్రాకింగ్
+    user_ip = request.remote_addr
+    today_dt = date.today()
+    current_m = datetime.now().strftime('%Y-%m')
+    
+    existing_log = VisitorLog.query.filter_by(ip_address=user_ip, visit_date=today_dt).first()
+    if not existing_log:
+        new_log = VisitorLog(ip_address=user_ip, visit_date=today_dt, visit_month=current_m)
+        db.session.add(new_log)
+        db.session.commit()
+        
+    today_count = VisitorLog.query.filter_by(visit_date=today_dt).count()
+    month_count = VisitorLog.query.filter_by(visit_month=current_m).count()
+    total_count = VisitorLog.query.count()
+    
+    stats = {
+        'today_count': today_count if today_count > 0 else 1,
+        'month_count': month_count if month_count > 0 else 1,
+        'total_count': total_count if total_count > 0 else 1
+    }
+
+    # 🔄 జాబ్స్ ఆటో-డిలీట్ మరియు లైవ్ టెలిగ్రామ్ సింకింగ్ రన్ అవుతుంది
+    jobs = sync_and_clean_jobs()
+    return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, job_updates=jobs, stats=stats)
 
 @app.route('/apply-pan', methods=['POST'])
 def apply_pan():
@@ -609,7 +683,7 @@ def apply_pan_birth():
     )
     db.session.add(new_app)
     db.session.commit()
-    flash("PAN Application with Birth Proof submitted successfully! Fee of ₹299 received.")
+    flash("PAN Application with Birth Proof submitted successfully!")
     return redirect(url_for('index'))
 
 @app.route('/request-health-insurance', methods=['POST'])
@@ -622,7 +696,7 @@ def request_health():
     )
     db.session.add(new_req)
     db.session.commit()
-    flash("Health Insurance inquiry submitted successfully! We will contact you soon.")
+    flash("Health Insurance inquiry submitted successfully!")
     return redirect(url_for('index'))
 
 @app.route('/request-vehicle-insurance', methods=['POST'])
@@ -651,35 +725,22 @@ def request_life():
     flash("Life Insurance inquiry submitted successfully!")
     return redirect(url_for('index'))
 
-# ----------------------------------------
-# 🔒 సెక్యూర్ అడ్మిన్ లాగిన్ & డాష్‌బోర్డ్
-# ----------------------------------------
-
+# 🔒 అడ్మిన్ లాగిన్
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         if request.form.get('username') == 'admin' and request.form.get('password') == 'Ravi@123':
             session['logged_in'] = True
-            flash('Successfully logged into Admin Panel!')
             return redirect(url_for('dashboard'))
         else:
             flash('Invalid Username or Password!')
     return render_template_string('''
-        <div style="max-width: 400px; margin: 100px auto; padding: 30px; border: 1px solid #ddd; border-radius: 8px; font-family: sans-serif; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-            <h2 style="text-align: center; color: #333;">SLNS Admin Login</h2>
-            {% with messages = get_flashed_messages() %}
-              {% if messages %}{% for m in messages %}<p style="color: red; text-align: center;">{{m}}</p>{% endfor %}{% endif %}
-            {% endwith %}
+        <div style="max-width: 400px; margin: 100px auto; padding: 30px; border: 1px solid #ddd; border-radius: 8px; font-family: sans-serif;">
+            <h2 style="text-align: center;">SLNS Admin Login</h2>
             <form method="POST">
-                <div style="margin-bottom: 15px;">
-                    <label>Username:</label><br>
-                    <input type="text" name="username" required style="width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box;">
-                </div>
-                <div style="margin-bottom: 20px;">
-                    <label>Password:</label><br>
-                    <input type="password" name="password" required style="width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box;">
-                </div>
-                <button type="submit" style="background: #007bff; color: white; border: none; padding: 12px; width: 100%; border-radius: 4px; font-size: 16px; cursor: pointer;">Login</button>
+                <div style="margin-bottom: 15px;"><label>Username:</label><input type="text" name="username" required style="width: 100%; padding: 8px;"></div>
+                <div style="margin-bottom: 20px;"><label>Password:</label><input type="password" name="password" required style="width: 100%; padding: 8px;"></div>
+                <button type="submit" style="background: #007bff; color: white; padding: 10px; width: 100%; border: none;">Login</button>
             </form>
         </div>
     ''')
@@ -693,7 +754,6 @@ def logout():
 def dashboard():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
-    
     pans = PanApplication.query.all()
     addresses = AddressUpdateApplication.query.all()
     birth_pans = PanWithBirthApplication.query.all()
@@ -702,88 +762,46 @@ def dashboard():
     life_reqs = LifeInsuranceRequest.query.all()
 
     DASHBOARD_CONTENT = """
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 text-dark">
         <h2>🔒 SLNS Admin Dashboard</h2>
         <a href="/logout" class="btn btn-danger btn-sm">Sign Out</a>
     </div>
-    
     <ul class="nav nav-tabs" id="myTab" role="tablist">
       <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab1">Standard PAN</button></li>
       <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab2">Address Update</button></li>
       <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab3">PAN with Birth</button></li>
       <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab4">Insurance Inquiries</button></li>
     </ul>
-    
-    <div class="tab-content bg-white p-3 border border-top-0 rounded-bottom">
+    <div class="tab-content bg-white p-3 border border-top-0 rounded-bottom text-dark">
       <div class="tab-pane fade show active" id="tab1">
         <table class="table table-striped mt-2">
-            <thead><tr><th>Name</th><th>Father Name</th><th>Aadhaar [Omitted]</th><th>Mobile</th><th>DOB</th></tr></thead>
-            <tbody>
-                {% for p in pans %}
-                <tr><td>{{p.full_name}}</td><td>{{p.father_name}}</td><td>[Aadhaar Redacted]</td><td>{{p.mobile_num}}</td><td>{{p.dob}}</td></tr>
-                {% endfor %}
-            </tbody>
+            <thead><tr><th>Name</th><th>Father Name</th><th>Mobile</th><th>DOB</th></tr></thead>
+            <tbody>{% for p in pans %}<tr><td>{{p.full_name}}</td><td>{{p.father_name}}</td><td>{{p.mobile_num}}</td><td>{{p.dob}}</td></tr>{% endfor %}</tbody>
         </table>
       </div>
       <div class="tab-pane fade" id="tab2">
         <table class="table table-striped mt-2">
-            <thead><tr><th>Voter ID</th><th>Aadhaar [Omitted]</th><th>Mobile</th><th>Address</th></tr></thead>
-            <tbody>
-                {% for a in addresses %}
-                <tr><td>{{a.voter_num}}</td><td>[Aadhaar Redacted]</td><td>{{a.mobile_num}}</td><td>{{a.address}}</td></tr>
-                {% endfor %}
-            </tbody>
+            <thead><tr><th>Voter ID</th><th>Mobile</th><th>Address</th></tr></thead>
+            <tbody>{% for a in addresses %}<tr><td>{{a.voter_num}}</td><td>{{a.mobile_num}}</td><td>{{a.address}}</td></tr>{% endfor %}</tbody>
         </table>
       </div>
       <div class="tab-pane fade" id="tab3">
         <table class="table table-striped mt-2">
-            <thead><tr><th>Candidate</th><th>Father</th><th>Proof Type</th><th>Aadhaar [Omitted]</th><th>Files</th></tr></thead>
-            <tbody>
-                {% for b in birth_pans %}
-                <tr>
-                    <td>{{b.candidate_name}}</td>
-                    <td>{{b.father_name}}</td>
-                    <td>{{b.birth_proof_type}}</td>
-                    <td>[Aadhaar Redacted]</td>
-                    <td>
-                        <small>
-                        📸 Photo: {{b.photo_filename}}<br>
-                        ✍️ Sig: {{b.signature_filename}}<br>
-                        📄 Aadh: {{b.aadhaar_filename}}<br>
-                        📜 Proof: {{b.birth_proof_filename}}
-                        </small>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
+            <thead><tr><th>Candidate</th><th>Father</th><th>Proof Type</th><th>Files</th></tr></thead>
+            <tbody>{% for b in birth_pans %}<tr><td>{{b.candidate_name}}</td><td>{{b.father_name}}</td><td>{{b.birth_proof_type}}</td><td><small>📸 {{b.photo_filename}}<br>✍️ {{b.signature_filename}}</small></td></tr>{% endfor %}</tbody>
         </table>
       </div>
       <div class="tab-pane fade" id="tab4">
-        <h5 class="mt-2 text-info">❤️ Health Insurance Requests</h5>
-        <table class="table table-sm table-bordered">
-            <thead><tr><th>Name</th><th>Mobile</th><th>Age</th><th>History</th></tr></thead>
-            <tbody>
-                {% for h in health_reqs %}<tr><td>{{h.full_name}}</td><td>{{h.mobile_num}}</td><td>{{h.age}}</td><td>{{h.medical_history}}</td></tr>{% endfor %}
-            </tbody>
-        </table>
-        <h5 class="mt-3 text-danger">🚗 Vehicle Insurance Requests</h5>
-        <table class="table table-sm table-bordered">
-            <thead><tr><th>Name</th><th>Mobile</th><th>Type</th><th>Vehicle No</th></tr></thead>
-            <tbody>
-                {% for v in vehicle_reqs %}<tr><td>{{v.full_name}}</td><td>{{v.mobile_num}}</td><td>{{v.vehicle_type}}</td><td>{{v.vehicle_number}}</td></tr>{% endfor %}
-            </tbody>
-        </table>
-        <h5 class="mt-3 text-warning">☂️ Life Insurance Requests</h5>
-        <table class="table table-sm table-bordered">
-            <thead><tr><th>Name</th><th>Mobile</th><th>DOB</th><th>Coverage</th></tr></thead>
-            <tbody>
-                {% for l in life_reqs %}<tr><td>{{l.full_name}}</td><td>{{l.mobile_num}}</td><td>{{l.dob}}</td><td>{{l.coverage_amount}}</td></tr>{% endfor %}
-            </tbody>
-        </table>
+        <h5 class="text-info">❤️ Health Insurance</h5>
+        <table class="table table-sm table-bordered"><tbody>{% for h in health_reqs %}<tr><td>{{h.full_name}}</td><td>{{h.mobile_num}}</td><td>{{h.age}}</td></tr>{% endfor %}</tbody></table>
+        <h5 class="text-danger mt-3">🚗 Vehicle Insurance</h5>
+        <table class="table table-sm table-bordered"><tbody>{% for v in vehicle_reqs %}<tr><td>{{v.full_name}}</td><td>{{v.mobile_num}}</td><td>{{v.vehicle_number}}</td></tr>{% endfor %}</tbody></table>
+        <h5 class="text-warning mt-3">☂️ Life Insurance</h5>
+        <table class="table table-sm table-bordered"><tbody>{% for l in life_reqs %}<tr><td>{{l.full_name}}</td><td>{{l.mobile_num}}</td><td>{{l.coverage_amount}}</td></tr>{% endfor %}</tbody></table>
       </div>
     </div>
     """
-    return render_template_string(HTML_HEADER + DASHBOARD_CONTENT + HTML_FOOTER, pans=pans, addresses=addresses, birth_pans=birth_pans, health_reqs=health_reqs, vehicle_reqs=vehicle_reqs, life_reqs=life_reqs)
+    return render_template_string(DASHBOARD_CONTENT)
 
 if __name__ == '__main__':
     with app.app_context():
