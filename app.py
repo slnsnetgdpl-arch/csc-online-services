@@ -102,47 +102,44 @@ class JobNotification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 # ----------------------------------------
-# 🔍 100% పక్కా లైవ్ ఎగ్జాక్ట్ డేటా సింకింగ్ ఫంక్షన్
+# 🔍 100% సేఫ్ & ఫాస్ట్ డేటా సింకింగ్ ఫంక్షన్
 # ----------------------------------------
 def sync_and_clean_jobs():
     # 45 రోజుల పాత నోటిఫికేషన్లు క్లీన్ చేయడం
-    time_threshold = datetime.now() - timedelta(days=45)
-    JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
-    db.session.commit()
+    try:
+        time_threshold = datetime.now() - timedelta(days=45)
+        JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
     channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
-    
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
     
     for channel in channels:
         try:
-            # అన్-బ్లాక్ చేయబడిన టెలిగ్రామ్ క్లీన్ మిర్రర్ ఫీడ్స్ వెబ్ ప్రివ్యూ
             url = f"https://tg.ihtw.site/s/{channel}"
             req = urllib.request.Request(url, headers=headers)
             html = urllib.request.urlopen(req, timeout=3).read().decode('utf-8')
-            
-            # పక్కాగా అసలైన మెసేజ్ బాక్సులను మాత్రమే ఎంచుకోవడం
             messages = re.findall(r'<div class="tgme_widget_message_text[^">]*">(.*?)</div>', html, re.DOTALL)
             
-            for msg in messages[:3]:
-                # <a> ట్యాగ్స్ మరియు ఇతర ఫార్మాట్ క్లీన్ చేసే ముందు అసలైన కంటెంట్ కోల్పోకుండా చూసుకోవడం
-                text = re.sub(r'<br\s*/?>', '\n', msg) # బ్రేక్ ట్యాగ్స్ ని కొత్త లైన్లుగా మార్చడం
-                text = re.sub(r'<[^>]*>', '', text) # మిగిలిన HTML క్లీన్ చేయడం
+            for msg in messages[:2]:
+                text = re.sub(r'<br\s*/?>', '\n', msg)
+                text = re.sub(r'<[^>]*>', '', text)
                 text = text.replace('&amp;', '&').replace('&quot;', '"').replace('&apos;', "'").strip()
                 
                 if len(text) < 30:
                     continue
                 
-                # 🚫 మీ నిబంధనల ప్రకారం ఇతర వెబ్‌సైట్ లింకులు మరియు 10 అంకెల మొబైల్ నంబర్ల ఫిల్టర్
+                # 🚫 ప్రొటెక్టెడ్ ఫిల్టర్స్
                 text = re.sub(r'https?://\S+|www\.\S+', '', text)
                 text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co)\b', '', text)
                 text = re.sub(r't\.me/\S+', '', text)
                 text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Protected]', text)
                 text = re.sub(r' +', ' ', text).strip()
                 
-                # మెనూ లింక్ కోసం అందమైన టైటిల్
                 title = text.split('\n')[0][:40] + "..." if len(text.split('\n')[0]) > 40 else text.split('\n')[0]
                 if not title:
                     title = text[:40] + "..."
@@ -153,9 +150,17 @@ def sync_and_clean_jobs():
                     db.session.add(new_job)
             db.session.commit()
         except Exception:
+            db.session.rollback()
             continue
 
-    return JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
+    # ఒకవేళ టెలిగ్రామ్ మిర్రర్ నెమ్మదించినా లోడింగ్ ఆగకుండా డేటాబేస్ లో ఉన్న పాత వివరాలు చూపిస్తుంది
+    all_jobs = JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
+    if not all_jobs:
+        # బ్యాకప్ డేటా - ఖాళీగా ఉంచకుండా వెంటనే ప్రదర్శిస్తుంది
+        return [
+            JobNotification(id=1, source="SLNS INFO", title="జాబ్ నోటిఫికేషన్స్ లైవ్ అప్‌డేట్ అవుతున్నాయి...", text="తెలంగాణ మరియు కేంద్ర ప్రభుత్వ ఉద్యోగాల తాజా సమాచారం ఇక్కడ ఆటోమేటిక్‌గా లోడ్ అవుతుంది. దయచేసి కొద్దిసేపటి తర్వాత పేజీని రీఫ్రెష్ చేయండి.", created_at=datetime.now())
+        ]
+    return all_jobs
 
 # ----------------------------------------
 # 🎨 HTML లేఅవుట్ టెంప్లేట్స్ (UI Design)
@@ -186,7 +191,7 @@ HTML_HEADER = """
         #sidebar-left ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
         
         #sidebar-right { min-width: 300px; max-width: 300px; background: #fff; min-height: calc(100vh - 56px); padding: 20px 12px; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e2e8f0; }
-        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13.5px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: all 0.2s; }
+        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13px; font-weight: 600; transition: all 0.2s; }
         #sidebar-right .job-link:hover { background: #fff3cd; color: #b45309; transform: translateX(3px); }
         
         #content { flex-grow: 1; padding: 30px; min-height: calc(100vh - 56px); background: #f8fafc; }
@@ -268,10 +273,10 @@ HTML_FOOTER = """
                 {% for job in job_updates %}
                     <a href="#" class="job-link" data-bs-toggle="modal" data-bs-target="#jobModal{{ job.id }}">
                         <div class="d-flex justify-content-between align-items-center mb-1">
-                            <span class="badge bg-dark text-white text-uppercase" style="font-size:9px; padding:3px 6px;">{{ job.source }}</span>
+                            <span class="badge bg-dark text-white text-uppercase" style="font-size:9px; padding:2px 5px;">{{ job.source }}</span>
                             <span class="text-muted" style="font-size:10px;"><i class="far fa-clock"></i> {{ job.created_at.strftime('%d-%b %I:%M %p') }}</span>
                         </div>
-                        <div class="text-truncate-2" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;">{{ job.title }}</div>
+                        <div style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;">{{ job.title }}</div>
                     </a>
                 {% endfor %}
             {% else %}
@@ -281,27 +286,27 @@ HTML_FOOTER = """
     </nav>
 </div> <!-- wrapper closing -->
 
-<!-- 📑 ప్రతి జాబ్ లింక్ కోసం పాప్-అప్ విండోలు (పూర్తి ఒరిజినల్ కంటెంట్ బాక్స్) -->
+<!-- 📑 ప్రతి జాబ్ లింక్ కోసం పాప్-అప్ విండోలు -->
 {% if job_updates %}
     {% for job in job_updates %}
     <div class="modal fade" id="jobModal{{ job.id }}" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
-        <div class="modal-content text-dark" style="border-radius:12px; border:none; box-shadow:0 10px 30px rgba(0,0,0,0.2);">
+        <div class="modal-content text-dark" style="border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.15);">
           <div class="modal-header bg-dark text-white py-3">
             <div>
-               <h5 class="modal-title font-weight-bold"><i class="fas fa-bullhorn text-warning me-2"></i> {{ job.source }} Official Notification</h5>
-               <small class="text-light-50">Posted on: {{ job.created_at.strftime('%d-%m-%Y %I:%M %p') }}</small>
+               <h5 class="modal-title font-weight-bold"><i class="fas fa-bullhorn text-warning me-2"></i> {{ job.source }} Notification</h5>
+               <small class="text-white-50">Posted on: {{ job.created_at.strftime('%d-%m-%Y %I:%M %p') }}</small>
             </div>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
-          <div class="modal-body p-4" style="font-size: 15px; line-height: 1.7; white-space: pre-wrap; background: #fafafa; font-weight: 500; color: #1e293b;">{{ job.text }}</div>
+          <div class="modal-body p-4" style="font-size: 15px; line-height: 1.7; white-space: pre-wrap; background: #fafafa; color: #1e293b;">{{ job.text }}</div>
           
           <!-- 💬 కాంటాక్ట్ సపోర్ట్ బటన్స్ సెక్షన్ -->
           <div class="p-3 bg-light border-top text-center">
-             <h6 class="font-weight-bold text-dark mb-3" style="font-size: 14px;"><i class="fas fa-headset text-primary me-1"></i> ఈ ఉద్యోగానికి ఆన్‌లైన్ లో అప్లై చేయడానికి మా సపోర్ట్ టీమ్‌ను సంప్రదించండి:</h6>
+             <h6 class="font-weight-bold text-dark mb-3" style="font-size: 13px;">📞 ఈ ఉద్యోగానికి ఆన్‌లైన్ లో అప్లై చేయడానికి మా సపోర్ట్ టీమ్‌ను సంప్రదించండి:</h6>
              <div class="d-flex flex-wrap justify-content-center gap-3">
-                 <a href="https://wa.me/919390038979" target="_blank" class="btn btn-success px-4 py-2 font-weight-bold shadow-sm" style="border-radius:6px;"><i class="fab fa-whatsapp me-2" style="font-size:16px;"></i> WhatsApp Help</a>
-                 <a href="https://t.me/pancsc" target="_blank" class="btn btn-primary px-4 py-2 font-weight-bold shadow-sm" style="border-radius:6px; background:#0088cc;"><i class="fab fa-telegram-plane me-2" style="font-size:16px;"></i> Telegram Channel</a>
+                 <a href="https://wa.me/919390038979" target="_blank" class="btn btn-success px-4 py-2 font-weight-bold shadow-sm" style="border-radius:6px;"><i class="fab fa-whatsapp me-2"></i> WhatsApp Help</a>
+                 <a href="https://t.me/pancsc" target="_blank" class="btn btn-info px-4 py-2 font-weight-bold shadow-sm text-white" style="border-radius:6px; background:#0088cc;"><i class="fab fa-telegram-plane me-2"></i> Telegram Channel</a>
              </div>
           </div>
           
@@ -610,11 +615,14 @@ def index():
     today_dt = date.today()
     current_m = datetime.now().strftime('%Y-%m')
     
-    existing_log = VisitorLog.query.filter_by(ip_address=user_ip, visit_date=today_dt).first()
-    if not existing_log:
-        new_log = VisitorLog(ip_address=user_ip, visit_date=today_dt, visit_month=current_m)
-        db.session.add(new_log)
-        db.session.commit()
+    try:
+        existing_log = VisitorLog.query.filter_by(ip_address=user_ip, visit_date=today_dt).first()
+        if not existing_log:
+            new_log = VisitorLog(ip_address=user_ip, visit_date=today_dt, visit_month=current_m)
+            db.session.add(new_log)
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
         
     today_count = VisitorLog.query.filter_by(visit_date=today_dt).count()
     month_count = VisitorLog.query.filter_by(visit_month=current_m).count()
@@ -626,7 +634,7 @@ def index():
         'total_count': total_count if total_count > 0 else 1
     }
 
-    # ఆటోమేటిక్ సింక్ ప్రక్రియ
+    # 🔗 అల్ట్రా-ఫాస్ట్ సింకింగ్ బాక్స్
     jobs = sync_and_clean_jobs()
     return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, job_updates=jobs, stats=stats)
 
@@ -732,7 +740,7 @@ def request_life():
     flash("Life Insurance inquiry submitted successfully!")
     return redirect(url_for('index'))
 
-# 🔒 అడ్మిన్ డాష్‌బోర్డ్
+# 🔒 అడ్మిన్ లాగిన్ & డాష్‌బోర్డ్ సెక్షన్ (ఫిక్స్డ్ రూట్)
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -742,12 +750,12 @@ def login():
         else:
             flash('Invalid Username or Password!')
     return render_template_string('''
-        <div style="max-width: 400px; margin: 100px auto; padding: 30px; border: 1px solid #ddd; border-radius: 8px;">
-            <h2>SLNS Admin Login</h2>
+        <div style="max-width: 400px; margin: 100px auto; padding: 30px; border: 1px solid #ddd; border-radius: 8px; font-family: sans-serif;">
+            <h2 style="text-align: center;">SLNS Admin Login</h2>
             <form method="POST">
-                <input type="text" name="username" placeholder="Username" required><br><br>
-                <input type="password" name="password" placeholder="Password" required><br><br>
-                <button type="submit">Login</button>
+                <div style="margin-bottom: 15px;"><label>Username:</label><input type="text" name="username" required style="width: 100%; padding: 8px;"></div>
+                <div style="margin-bottom: 20px;"><label>Password:</label><input type="password" name="password" required style="width: 100%; padding: 8px;"></div>
+                <button type="submit" style="background: #007bff; color: white; padding: 10px; width: 100%; border: none;">Login</button>
             </form>
         </div>
     ''')
@@ -761,7 +769,59 @@ def logout():
 def dashboard():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
-    return "Admin Panel - All Data safe in SQLite database.db"
+    
+    pans = PanApplication.query.all()
+    addresses = AddressUpdateApplication.query.all()
+    birth_pans = PanWithBirthApplication.query.all()
+    health_reqs = HealthInsuranceRequest.query.all()
+    vehicle_reqs = VehicleInsuranceRequest.query.all()
+    life_reqs = LifeInsuranceRequest.query.all()
+
+    DASHBOARD_CONTENT = """
+    <div class="container mt-5 text-dark">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>🔒 SLNS Admin Dashboard</h2>
+            <a href="/logout" class="btn btn-danger btn-sm">Sign Out</a>
+        </div>
+        <ul class="nav nav-tabs" id="myTab" role="tablist">
+          <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab1">Standard PAN</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab2">Address Update</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab3">PAN with Birth</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab4">Insurance Inquiries</button></li>
+        </ul>
+        <div class="tab-content bg-white p-3 border border-top-0 rounded-bottom">
+          <div class="tab-pane fade show active" id="tab1">
+            <table class="table table-striped mt-2">
+                <thead><tr><th>Name</th><th>Father Name</th><th>Mobile</th><th>DOB</th></tr></thead>
+                <tbody>{% for p in pans %}<tr><td>{{p.full_name}}</td><td>{{p.father_name}}</td><td>{{p.mobile_num}}</td><td>{{p.dob}}</td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+          <div class="tab-pane fade" id="tab2">
+            <table class="table table-striped mt-2">
+                <thead><tr><th>Voter ID</th><th>Mobile</th><th>Address</th></tr></thead>
+                <tbody>{% for a in addresses %}<tr><td>{{a.voter_num}}</td><td>{{a.mobile_num}}</td><td>{{a.address}}</td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+          <div class="tab-pane fade" id="tab3">
+            <table class="table table-striped mt-2">
+                <thead><tr><th>Candidate</th><th>Father</th><th>Proof Type</th><th>Files</th></tr></thead>
+                <tbody>{% for b in birth_pans %}<tr><td>{{b.candidate_name}}</td><td>{{b.father_name}}</td><td>{{b.birth_proof_type}}</td><td><small>📸 {{b.photo_filename}}<br>✍️ {{b.signature_filename}}</small></td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+          <div class="tab-pane fade" id="tab4">
+            <h5 class="text-info">❤️ Health Insurance</h5>
+            <table class="table table-sm table-bordered"><tbody>{% for h in health_reqs %}<tr><td>{{h.full_name}}</td><td>{{h.mobile_num}}</td><td>{{h.age}}</td></tr>{% endfor %}</tbody></table>
+            <h5 class="text-danger mt-3">🚗 Vehicle Insurance</h5>
+            <table class="table table-sm table-bordered"><tbody>{% for v in vehicle_reqs %}<tr><td>{{v.full_name}}</td><td>{{v.mobile_num}}</td><td>{{v.vehicle_number}}</td></tr>{% endfor %}</tbody></table>
+            <h5 class="text-warning mt-3">☂️ Life Insurance</h5>
+            <table class="table table-sm table-bordered"><tbody>{% for l in life_reqs %}<tr><td>{{l.full_name}}</td><td>{{l.mobile_num}}</td><td>{{l.coverage_amount}}</td></tr>{% endfor %}</tbody></table>
+          </div>
+        </div>
+        <div class="mt-4"><a href="/" class="btn btn-secondary btn-sm">← Back to Main Web Portal</a></div>
+    </div>
+    """
+    # ఇక్కడ పాత రిటర్న్ టైప్ తప్పును సరిదిద్ది హెడర్/ఫుటర్ లూప్ లేకుండా క్లీన్ చేశాను
+    return render_template_string('<!DOCTYPE html><html><head><title>Dashboard</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"></head><body class="bg-light">' + DASHBOARD_CONTENT + '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script></body></html>', pans=pans, addresses=addresses, birth_pans=birth_pans, health_reqs=health_reqs, vehicle_reqs=vehicle_reqs, life_reqs=life_reqs)
 
 if __name__ == '__main__':
     with app.app_context():
