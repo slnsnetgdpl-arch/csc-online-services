@@ -127,15 +127,15 @@ HTML_HEADER = """
             border-radius: 8px;
             padding: 15px;
             text-align: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.06);
             font-weight: bold;
             color: #2c5364;
-            border-bottom: 3px solid #203a43;
-            font-size: 13px;
+            border-bottom: 4px solid #203a43;
+            font-size: 14px;
             transition: all 0.3s;
         }
         .brand-logo-card:hover {
-            transform: scale(1.05);
+            transform: translateY(-4px);
             background: #203a43;
             color: #fff;
         }
@@ -464,7 +464,7 @@ INDEX_CONTENT = """
 </div>
 
 <!-- 🏢 TOP INSURANCE BRANDS LOGO SECTION -->
-<div class="row mt-5 mb-3">
+<div class="row mt-5 mb-5">
     <div class="col-12 text-center mb-4">
         <h3 style="color: #2c5364; font-weight: 700; border-bottom: 3px solid #203a43; display: inline-block; padding-bottom: 10px;">🤝 Our Authorized Insurance Partners</h3>
         <p class="text-muted">మేము భారతదేశంలో అత్యంత విశ్వసనీయమైన ఇన్సూరెన్స్ భాగస్వాములతో కలిసి సేవలను అందిస్తున్నాము.</p>
