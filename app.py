@@ -102,10 +102,11 @@ class JobNotification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 # ----------------------------------------
-# 🔍 మల్టీ-ఫీడ్ సింకింగ్ ఫంక్షన్ (Bikki News వెబ్‌సైట్‌తో సహా)
+# 🔍 ఫిక్స్డ్: ఫాస్ట్ సింకింగ్ ఫంక్షన్ (క్రాష్ ప్రొటెక్షన్ తో)
 # ----------------------------------------
 def sync_and_clean_jobs():
     try:
+        # 45 दिनों से पुराने जॉब्स डिलीट करना
         time_threshold = datetime.now() - timedelta(days=45)
         JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
         db.session.commit()
@@ -116,15 +117,14 @@ def sync_and_clean_jobs():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
 
-    # 🌐 1. BIKKI NEWS వెబ్‌సైట్ ఫీడ్ స్క్రాపింగ్ (అఫీషియల్ RSS ఫీడ్ పద్ధతి - క్రాష్ అవ్వదు)
+    # 🌐 1. BIKKI NEWS వెబ్‌సైట్ ఫీడ్ సింకింగ్
     try:
         bikki_url = "https://bikkinews.in/feed/"
         bikki_req = urllib.request.Request(bikki_url, headers=headers)
-        bikki_xml = urllib.request.urlopen(bikki_req, timeout=3).read().decode('utf-8')
+        bikki_xml = urllib.request.urlopen(bikki_req, timeout=2).read().decode('utf-8')
         
-        # XML నుండి టైటిల్ మరియు డిస్క్రిప్షన్ కంటెంట్లను వేరు చేయడం
         bikki_items = re.findall(r'<item>(.*?)</item>', bikki_xml, re.DOTALL)
-        for item in bikki_items[:4]:  # లేటెస్ట్ 4 పోస్టులు
+        for item in bikki_items[:3]:
             b_title = re.search(r'<title>(.*?)</title>', item)
             b_desc = re.search(r'<description>(.*?)</description>', item)
             
@@ -132,26 +132,24 @@ def sync_and_clean_jobs():
                 title_text = re.sub(r'<[^>]*>', '', b_title.group(1)).strip()
                 desc_text = re.sub(r'<[^>]*>', '', b_desc.group(1)).replace('<![CDATA[', '').replace(']]>', '').strip()
                 
-                # 🚫 మీ నిబంధనల ప్రకారం ఇతర ఫోన్ నంబర్లు మరియు వెబ్‌సైట్ లింకుల ఫిల్టర్
                 desc_text = re.sub(r'https?://\S+|www\.\S+', '', desc_text)
                 desc_text = re.sub(r'\b\d{10}\b', '[Protected]', desc_text)
                 
-                # డేటాబేస్ లో సేవ్ చేయడం
                 existing = JobNotification.query.filter_by(title=title_text).first()
-                if not existing and len(desc_text) > 30:
+                if not existing and len(desc_text) > 20:
                     new_bikki_job = JobNotification(source="JOB UPDATE", title=title_text, text=desc_text)
                     db.session.add(new_bikki_job)
         db.session.commit()
     except Exception:
         db.session.rollback()
 
-    # ✈️ 2. పాత టెలిగ్రామ్ ఛానెల్స్ సమాచారం స్క్రాపింగ్
+    # ✈️ 2. టెలిగ్రామ్ మిర్రర్ ఫీడ్స్ సింకింగ్
     channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
     for channel in channels:
         try:
             url = f"https://tg.ihtw.site/s/{channel}"
             req = urllib.request.Request(url, headers=headers)
-            html = urllib.request.urlopen(req, timeout=3).read().decode('utf-8')
+            html = urllib.request.urlopen(req, timeout=2).read().decode('utf-8')
             messages = re.findall(r'<div class="tgme_widget_message_text[^">]*"([^>]*)>(.*?)</div>', html, re.DOTALL)
             
             for msg_match in messages[:2]:
@@ -181,7 +179,18 @@ def sync_and_clean_jobs():
             db.session.rollback()
             continue
 
-    return JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
+    # 🔄 పటిష్టమైన మార్పు: ఏదైనా నెట్‌వర్క్ ఎర్రర్ వచ్చినా తిరగకుండా డేటాబేస్ లో ఉన్న పాత జాబ్స్ ని ఇన్‌స్టంట్‌గా పంపుతుంది
+    try:
+        all_jobs = JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
+        if all_jobs:
+            return all_jobs
+    except Exception:
+        pass
+
+    # ఒకవేళ డేటాబేస్ పూర్తిగా ఖాళీగా ఉంటే లోడింగ్ ఇండికేటర్ ఆపడానికి డెమో బాక్స్
+    return [
+        JobNotification(id=999, source="JOB UPDATE", title="తాజా ఎడ్యుకేషన్ & జాబ్ నోటిఫికేషన్ వివరాలు", text="తాజా విద్యా మరియు ఉద్యోగ సమాచారం ఇక్కడ ఆటోమేటిక్‌గా ప్రదర్శించబడుతుంది. వివరాల కోసం దయచేసి కొద్దిసేపటి తర్వాత పేజీని రీఫ్రెష్ చేయండి.", created_at=datetime.now())
+    ]
 
 # ----------------------------------------
 # 🎨 HTML లేఅవుట్ టెంప్లేట్స్ (UI Design)
