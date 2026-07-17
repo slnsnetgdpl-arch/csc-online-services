@@ -94,45 +94,44 @@ class LifeInsuranceRequest(db.Model):
 def get_clean_telegram_jobs():
     channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
     clean_updates = []
+    job_id = 1
     
     for channel in channels:
         try:
-            # టెలిగ్రామ్ పబ్లిక్ వెబ్ ప్రివ్యూ నుండి డేటా తెచ్చుకోవడం
             url = f"https://t.me/s/{channel}"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             html = urllib.request.urlopen(req, timeout=5).read().decode('utf-8')
-            
-            # మెసేజ్ టెక్స్ట్‌లను మాత్రమే వేరు చేయడం
             messages = re.findall(r'<div class="tgme_widget_message_text[^">]*">(.*?)</div>', html, re.DOTALL)
             
-            for msg in messages[:3]: # ప్రతి ఛానెల్ నుండి లేటెస్ట్ 3 మెసేజ్‌లు మాత్రమే
-                # HTML ట్యాగ్‌లు తీసేయడం
+            for msg in messages[:3]:
                 text = re.sub(r'<[^>]*>', '', msg)
                 text = text.replace('&amp;', '&').replace('&quot;', '"').strip()
                 
-                if len(text) < 40: # మరీ చిన్నగా ఉన్న మెసేజ్లు వదిలేయడం
+                if len(text) < 40:
                     continue
                 
-                # 🚫 1. లింకులు తొలగించే ఫిల్టర్ (http, https, t.me, domains)
+                # 🚫 లింకులు మరియు ఫోన్ నంబర్ల ఫిల్టర్
                 text = re.sub(r'https?://\S+|www\.\S+', '', text)
                 text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co)\b', '', text)
                 text = re.sub(r't\.me/\S+', '', text)
-                
-                # 🚫 2. 10 అంకెల మొబైల్ నంబర్లు తొలగించే ఫిల్టర్
-                text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Number Removed]', text)
-                
-                # డబుల్ స్పేస్‌లు క్లీన్ చేయడం
+                text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Information Protected]', text)
                 text = re.sub(r'\s+', ' ', text).strip()
+                
+                # మోడల్ పాప్-అప్ కోసం ఒక చిన్న టైటిల్ క్రియేట్ చేయడం
+                title = text[:45] + "..." if len(text) > 45 else text
                 
                 if text and text not in [j['text'] for j in clean_updates]:
                     clean_updates.append({
+                        'id': job_id,
                         'source': channel.upper(),
+                        'title': title,
                         'text': text
                     })
+                    job_id += 1
         except Exception:
             continue
             
-    return clean_updates[:10] # గరిష్టంగా టాప్ 10 క్లీన్ నోటిఫికేషన్లు ప్రదర్శిస్తుంది
+    return clean_updates[:12] # గరిష్టంగా 12 లేటెస్ట్ లింకులు చూపిస్తుంది
 
 # ----------------------------------------
 # 🎨 HTML లేఅవుట్ టెంప్లేట్స్ (UI Design)
@@ -155,38 +154,27 @@ HTML_HEADER = """
         .form-label { font-weight: 600; }
         .note-box { color: #b58900; background: #fff3cd; padding: 10px; border-radius: 5px; font-size: 14px; border-left: 4px solid #ffc107; }
         
-        /* సైడ్‌బార్ స్టైలింగ్ */
+        /* 3-Column Layout: Left Menu | Content | Right Menu */
         .wrapper { display: flex; width: 100%; align-items: stretch; }
-        #sidebar { min-width: 280px; max-width: 280px; background: linear-gradient(180deg, #0f2027, #203a43); color: #fff; transition: all 0.3s; min-height: calc(100vh - 56px); padding-top: 20px; box-shadow: 4px 0 10px rgba(0,0,0,0.1); }
-        #sidebar .sidebar-header { padding: 15px 20px; background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255,255,255,0.1); }
-        #sidebar ul.components { padding: 15px 0; }
-        #sidebar ul li a { padding: 12px 20px; font-size: 15px; display: block; color: rgba(255,255,255,0.8); text-decoration: none; transition: all 0.3s; font-weight: 500; }
-        #sidebar ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
-        #sidebar ul li.active > a { color: #fff; background: rgba(255,255,255,0.15); border-left: 4px solid #00d2ff; }
         
-        #content { width: 100%; padding: 30px; min-height: calc(100vh - 56px); }
+        #sidebar-left { min-width: 240px; max-width: 240px; background: linear-gradient(180deg, #0f2027, #203a43); color: #fff; min-height: calc(100vh - 56px); padding-top: 20px; box-shadow: 4px 0 10px rgba(0,0,0,0.1); }
+        #sidebar-left .menu-header { padding: 10px 20px; background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255,255,255,0.1); font-weight: bold; }
+        #sidebar-left ul li a { padding: 12px 20px; font-size: 14px; display: block; color: rgba(255,255,255,0.8); text-decoration: none; transition: all 0.3s; font-weight: 500; }
+        #sidebar-left ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
         
-        .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25d366; color: white; padding: 12px 20px; border-radius: 30px; font-weight: bold; text-decoration: none; box-shadow: 0 4px 10px rgba(0,0,0,0.2); z-index: 9999; transition: transform 0.2s; }
-        .whatsapp-float:hover { transform: scale(1.05); color: white; }
+        #sidebar-right { min-width: 280px; max-width: 280px; background: #fff; min-height: calc(100vh - 56px); padding: 20px 15px; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e2e8f0; }
+        #sidebar-right .job-link { display: block; padding: 10px 12px; margin-bottom: 8px; background: #f8fafc; border-left: 3px solid #ffc107; color: #334155; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13px; font-weight: 500; transition: all 0.2s; }
+        #sidebar-right .job-link:hover { background: #fff3cd; color: #b45309; transform: translateX(3px); }
         
-        /* బ్రాండ్ లోగోల స్టైల్స్ */
-        .brand-logo-card {
-            background: #fff;
-            border-radius: 8px;
-            padding: 15px;
-            text-align: center;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.06);
-            font-weight: bold;
-            color: #2c5364;
-            border-bottom: 4px solid #203a43;
-            font-size: 14px;
-            transition: all 0.3s;
-        }
-        .brand-logo-card:hover { transform: translateY(-4px); background: #203a43; color: #fff; }
+        #content { flex-grow: 1; padding: 30px; min-height: calc(100vh - 56px); background: #f8fafc; }
+        
+        .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25d366; color: white; padding: 12px 20px; border-radius: 30px; font-weight: bold; text-decoration: none; box-shadow: 0 4px 10px rgba(0,0,0,0.2); z-index: 9999; }
+        
+        .brand-logo-card { background: #fff; border-radius: 8px; padding: 12px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); font-weight: bold; color: #2c5364; border-bottom: 3px solid #203a43; font-size: 12px; }
 
-        @media (max-width: 991px) {
+        @media (max-width: 1200px) {
             .wrapper { flex-direction: column; }
-            #sidebar { min-width: 100%; max-width: 100%; min-height: auto; }
+            #sidebar-left, #sidebar-right { min-width: 100%; max-width: 100%; min-height: auto; }
         }
     </style>
 </head>
@@ -209,38 +197,21 @@ HTML_HEADER = """
 
 <div class="wrapper">
     <!-- 🗂️ ఎడమ వైపు మెనూ బార్ (Left Side Menu Bar) -->
-    <nav id="sidebar">
-        <div class="sidebar-header text-center">
-            🏢 <h6 class="d-inline font-weight-bold">SLNS Services Menu</h6>
-        </div>
-        <ul class="list-unstyled components">
-            <li class="active">
-                <a href="#standard-pan"><i class="fas fa-file-alt me-2"></i> 1. Standard PAN Card</a>
-            </li>
-            <li>
-                <a href="#address-update"><i class="fas fa-home me-2"></i> 2. Aadhaar Address Update</a>
-            </li>
-            <li>
-                <a href="#birth-pan"><i class="fas fa-certificate me-2"></i> 3. PAN with Birth Proof</a>
-            </li>
-            <li>
-                <a href="#job-updates" style="color: #ffc107;"><i class="fas fa-briefcase me-2"></i> 💼 Job Notifications</a>
-            </li>
+    <nav id="sidebar-left">
+        <div class="menu-header text-center">🏢 SLNS Services</div>
+        <ul class="list-unstyled components m-0 p-0">
+            <li><a href="#standard-pan"><i class="fas fa-file-alt me-2"></i> 1. Standard PAN Card</a></li>
+            <li><a href="#address-update"><i class="fas fa-home me-2"></i> 2. Aadhaar Address Update</a></li>
+            <li><a href="#birth-pan"><i class="fas fa-certificate me-2"></i> 3. PAN with Birth Proof</a></li>
             <hr style="border-color: rgba(255,255,255,0.15); margin: 10px 0;">
-            <div class="px-3 py-1 text-info" style="font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">Insurance Services</div>
-            <li>
-                <a href="#health-insurance" style="color: #00d2ff;"><i class="fas fa-heartbeat me-2"></i> Health Insurance</a>
-            </li>
-            <li>
-                <a href="#vehicle-insurance" style="color: #ff416c;"><i class="fas fa-car me-2"></i> Vehicle Insurance</a>
-            </li>
-            <li>
-                <a href="#life-insurance" style="color: #ffb199;"><i class="fas fa-umbrella me-2"></i> Life Insurance</a>
-            </li>
+            <div class="px-3 py-1 text-info" style="font-size: 11px; font-weight: bold; text-transform: uppercase;">Insurance Forms</div>
+            <li><a href="#health-insurance" style="color: #00d2ff;"><i class="fas fa-heartbeat me-2"></i> Health Insurance</a></li>
+            <li><a href="#vehicle-insurance" style="color: #ff416c;"><i class="fas fa-car me-2"></i> Vehicle Insurance</a></li>
+            <li><a href="#life-insurance" style="color: #ffb199;"><i class="fas fa-umbrella me-2"></i> Life Insurance</a></li>
         </ul>
     </nav>
 
-    <!-- 💻 కుడివైపు కంటెంట్ ఏరియా (Main Content Window) -->
+    <!-- 💻 మధ్యలో కంటెంట్ ఏరియా (Main Content Window) -->
     <div id="content">
         {% with messages = get_flashed_messages() %}
           {% if messages %}
@@ -256,7 +227,46 @@ HTML_HEADER = """
 
 HTML_FOOTER = """
     </div> <!-- content closing -->
+
+    <!-- 💼 కుడివైపు మెనూ బార్: జాబ్ నోటిఫికేషన్స్ లింకులు (Right Side Job Menu Bar) -->
+    <nav id="sidebar-right">
+        <h5 class="text-dark font-weight-bold mb-3 pb-2" style="border-bottom: 2px solid #ffc107;"><i class="fas fa-briefcase text-warning me-2"></i> Job Notifications</h5>
+        <p class="text-muted" style="font-size: 11px;">లింక్ క్లిక్ చేసి పూర్తి నోటిఫికేషన్ వివరాలు పాప్-అప్ విండోలో చూడండి.</p>
+        
+        <div style="max-height: 650px; overflow-y: auto;">
+            {% if job_updates %}
+                {% for job in job_updates %}
+                    <a href="#" class="job-link" data-bs-toggle="modal" data-bs-target="#jobModal{{ job.id }}">
+                        <span class="badge bg-secondary text-white mb-1" style="font-size:9px;">{{ job.source }}</span><br>
+                        {{ job.title }}
+                    </a>
+                {% endfor %}
+            {% else %}
+                <p class="text-muted text-center style='font-size:12px;'"><i class="fas fa-sync fa-spin"></i> Loading updates...</p>
+            {% endif %}
+        </div>
+    </nav>
 </div> <!-- wrapper closing -->
+
+<!-- 📑 ప్రతి జాబ్ లింక్ కోసం పాప్-అప్ విండోలు (Bootstrap Modals) -->
+{% if job_updates %}
+    {% for job in job_updates %}
+    <div class="modal fade" id="jobModal{{ job.id }}" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-light">
+            <h5 class="modal-title font-weight-bold text-dark">📢 {{ job.source }} Notification</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body text-dark" style="font-size: 14px; line-height: 1.6; white-space: pre-wrap;">{{ job.text }}</div>
+          <div class="modal-footer bg-light py-2">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-modal="dismiss" data-bs-dismiss="modal">Close Window</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+{% endif %}
 
 <!-- వాట్సాప్ లైవ్ హెల్ప్ చాట్ విజెట్ -->
 <a href="https://wa.me/919390038979" target="_blank" class="whatsapp-float">
@@ -268,31 +278,6 @@ HTML_FOOTER = """
 """
 
 INDEX_CONTENT = """
-<!-- 💼 AUTOMATIC JOB NOTIFICATIONS SECTION (టెలిగ్రామ్ ఫిల్టర్డ్ అప్‌డేట్స్) -->
-<div class="row mb-5" id="job-updates">
-    <div class="col-12">
-        <div class="card p-4" style="background: #fff; border-left: 6px solid #ffc107; box-shadow: 0 4px 15px rgba(0,0,0,0.08);">
-            <h4 class="text-dark font-weight-bold mb-3"><i class="fas fa-bullhorn text-warning me-2"></i> Latest Job & Education Updates (ఆటోమేటిక్ అప్‌డేట్స్)</h4>
-            <p class="text-muted mb-4" style="font-size:14px;">వివిధ విశ్వసనీయ టెలిగ్రామ్ ఛానెల్స్ నుండి సేకరించబడిన తాజా విద్యా మరియు ఉద్యోగ సమాచారం కింద ప్రదర్శించబడుతోంది (ఇతర లింకులు మరియు ఫోన్ నంబర్లు నిరోధించబడినవి).</p>
-            
-            <div style="max-height: 400px; overflow-y: auto; padding-right: 10px;">
-                {% if job_updates %}
-                    {% for job in job_updates %}
-                        <div class="p-3 mb-3 rounded" style="background: #f8f9fa; border-bottom: 2px solid #e9ecef;">
-                            <span class="badge bg-secondary mb-2" style="font-size:11px;">📡 Source: {{ job.source }}</span>
-                            <p class="mb-0 text-dark" style="font-size: 14px; line-height: 1.6; font-weight: 500;">{{ job.text }}</p>
-                        </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="text-center py-3 text-muted">
-                        <i class="fas fa-sync fa-spin me-2"></i> నోటిఫికేషన్లు లోడ్ అవుతున్నాయి... దయచేసి పేజీని రీఫ్రెష్ చేయండి.
-                    </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-</div>
-
 <div class="row">
     <!-- ఫారమ్ 1: PAN Card Service Standard -->
     <div class="col-md-6" id="standard-pan">
@@ -488,7 +473,7 @@ INDEX_CONTENT = """
                     <select name="vehicle_type" class="form-select" required>
                         <option value="">-- Select Type --</option>
                         <option value="Two Wheeler">Two Wheeler (బైక్ / స్కూటర్)</option>
-                        <option value="Four Wheeler">Four Wheeler (కారు / ఆటో / ట్రాక్టర్)</option>
+                        <option value="Four Wheeler">Four Wheeler (కారు / ఆటో /饕్రాక్టర్)</option>
                     </select>
                 </div>
                 <div class="mb-3">
@@ -536,47 +521,22 @@ INDEX_CONTENT = """
 </div>
 
 <!-- 🏢 TOP INSURANCE BRANDS LOGO SECTION -->
-<div class="row mt-5 mb-5">
+<div class="row mt-5 mb-4">
     <div class="col-12 text-center mb-4">
         <h3 style="color: #2c5364; font-weight: 700; border-bottom: 3px solid #203a43; display: inline-block; padding-bottom: 10px;">🤝 Our Authorized Insurance Partners</h3>
-        <p class="text-muted">మేము భారతదేశంలో అత్యంత విశ్వసనీయమైన ఇన్సూరెన్స్ భాగస్వాములతో కలిసి సేవలను అందిస్తున్నాము.</p>
     </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">🛡️ TATA AIA Life</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">🚗 TATA AIG General</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">📈 Bajaj Allianz</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">🩺 Niva Bupa</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">🏠 HDFC ERGO</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">🚙 ICICI Lombard</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">⭐ Star Health</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">🏦 SBI General</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">🏛️ Cholamandalam</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">🏢 United India</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">🤝 Universal Sompo</div>
-    </div>
-    <div class="col-6 col-md-3 mb-3">
-        <div class="brand-logo-card">💳 Axis Life</div>
-    </div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🛡️ TATA AIA Life</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🚗 TATA AIG Gen</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">📈 Bajaj Allianz</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🩺 Niva Bupa</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🏠 HDFC ERGO</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🚙 ICICI Lombard</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">⭐ Star Health</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🏦 SBI General</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🏛️ Chola MS</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🏢 United India</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🤝 Universal Sompo</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">💳 Axis Life</div></div>
 </div>
 """
 
@@ -586,7 +546,6 @@ INDEX_CONTENT = """
 
 @app.route('/')
 def index():
-    # లోడ్ అయిన ప్రతిసారీ టెలిగ్రామ్ ఛానెల్స్ నుండి క్లీన్ జాబ్ డేటా తెచ్చుకుంటుంది
     jobs = get_clean_telegram_jobs()
     return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, job_updates=jobs)
 
