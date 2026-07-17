@@ -102,11 +102,10 @@ class JobNotification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 # ----------------------------------------
-# 🔍 ఫిక్స్డ్: పక్కాగా ఒరిజినల్ డేటా తెచ్చే ఫంక్షన్
+# 🔍 డేటా సింకింగ్ ఫంక్షన్ (ఛానెల్ పేర్లు లేకుండా)
 # ----------------------------------------
 def sync_and_clean_jobs():
     try:
-        # 45 రోజుల పాత నోటిఫికేషన్లు క్లీన్ చేయడం
         time_threshold = datetime.now() - timedelta(days=45)
         JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
         db.session.commit()
@@ -114,25 +113,19 @@ def sync_and_clean_jobs():
         db.session.rollback()
 
     channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
-    
-    # గూగుల్ క్రోమ్ బ్రౌజర్ లాగా అభ్యర్థన పంపే హెడర్స్
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
     
     for channel in channels:
         try:
-            # నేరుగా అఫీషియల్ టెలిగ్రామ్ పబ్లిక్ ఎంబెడ్ ఛానెల్ ఫీడ్ వాడకం
-            url = f"https://t.me/s/{channel}"
+            url = f"https://tg.ihtw.site/s/{channel}"
             req = urllib.request.Request(url, headers=headers)
             html = urllib.request.urlopen(req, timeout=3).read().decode('utf-8')
-            
-            # టెలిగ్రామ్ లేటెస్ట్ HTML ట్యాగ్స్ మ్యాచ్ అయ్యేలా ఫిక్స్ చేసిన రీజెక్స్ (Regex)
             messages = re.findall(r'<div class="tgme_widget_message_text[^">]*"([^>]*)>(.*?)</div>', html, re.DOTALL)
             
             for msg_match in messages[:3]:
-                msg_content = msg_match[1] # అసలైన టెక్స్ట్ సమాచారం
+                msg_content = msg_match[1]
                 
                 text = re.sub(r'<br\s*/?>', '\n', msg_content)
                 text = re.sub(r'<[^>]*>', '', text)
@@ -141,37 +134,29 @@ def sync_and_clean_jobs():
                 if len(text) < 35:
                     continue
                 
-                # 🚫 ప్రొటెక్టెడ్ ఫిల్టర్స్ (లింకులు మరియు ఫోన్ నంబర్లు డిలీట్)
+                # 🚫 ప్రొటెక్టెడ్ ఫిల్టర్స్
                 text = re.sub(r'https?://\S+|www\.\S+', '', text)
                 text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co|me|site)\b', '', text)
                 text = re.sub(r't\.me/\S+', '', text)
                 text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Protected]', text)
                 text = re.sub(r' +', ' ', text).strip()
                 
-                # మొదటి లైన్ ని టైటిల్ లాగా మార్చడం
                 first_line = text.split('\n')[0].strip()
                 title = first_line[:40] + "..." if len(first_line) > 40 else first_line
                 if not title or len(title) < 5:
                     title = text[:40] + "..."
                 
                 existing = JobNotification.query.filter_by(text=text).first()
-                if not existing and text and "[Protected]" not in title:
-                    new_job = JobNotification(source=channel.upper(), title=title, text=text)
+                if not existing and text:
+                    # ఇక్కడ గ్రూప్ పేరుకు బదులు కేవలం జనరిక్ సిస్టమ్ లేబుల్ సేవ్ అవుతుంది
+                    new_job = JobNotification(source="JOB UPDATE", title=title, text=text)
                     db.session.add(new_job)
             db.session.commit()
         except Exception:
             db.session.rollback()
             continue
 
-    # డేటాబేస్ లో ఉన్న పోస్టులను క్రమపద్ధతిలో పంపడం
-    all_jobs = JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
-    
-    if not all_jobs:
-        # ఒకవేళ ఫస్ట్ టైం ఖాళీగా ఉంటే కస్టమర్ కి కనిపించే తాత్కాలిక సమాచారం
-        return [
-            JobNotification(id=1, source="SLNS INFO", title="జాబ్ నోటిఫికేషన్స్ అప్‌డేట్ అవుతున్నాయి...", text="తాజా విద్యా మరియు ఉద్యోగ సమాచారం ఇక్కడ ఆటోమేటిక్‌గా లోడ్ అవుతుంది. దయచేసి 1 నిమిషం తర్వాత పేజీని రీఫ్రెష్ చేయండి.", created_at=datetime.now())
-        ]
-    return all_jobs
+    return JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
 
 # ----------------------------------------
 # 🎨 HTML లేఅవుట్ టెంప్లేట్స్ (UI Design)
@@ -202,7 +187,7 @@ HTML_HEADER = """
         #sidebar-left ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
         
         #sidebar-right { min-width: 300px; max-width: 300px; background: #fff; min-height: calc(100vh - 56px); padding: 20px 12px; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e2e8f0; }
-        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13.5px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: all 0.2s; }
+        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13px; font-weight: 600; transition: all 0.2s; }
         #sidebar-right .job-link:hover { background: #fff3cd; color: #b45309; transform: translateX(3px); }
         
         #content { flex-grow: 1; padding: 30px; min-height: calc(100vh - 56px); background: #f8fafc; }
@@ -284,7 +269,8 @@ HTML_FOOTER = """
                 {% for job in job_updates %}
                     <a href="#" class="job-link" data-bs-toggle="modal" data-bs-target="#jobModal{{ job.id }}">
                         <div class="d-flex justify-content-between align-items-center mb-1">
-                            <span class="badge bg-dark text-white text-uppercase" style="font-size:9px; padding:2px 5px;">{{ job.source }}</span>
+                            <!-- 🛑 ఇక్కడ గ్రూప్ పేరుకు బదులు కేవలం జనరిక్ బాక్స్ మాత్రమే కనిపిస్తుంది -->
+                            <span class="badge bg-warning text-dark text-uppercase" style="font-size:9px; padding:2px 5px; font-weight:700;">{{ job.source }}</span>
                             <span class="text-muted" style="font-size:10px;"><i class="far fa-clock"></i> {{ job.created_at.strftime('%d-%b %I:%M %p') }}</span>
                         </div>
                         <div style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;">{{ job.title }}</div>
@@ -305,14 +291,15 @@ HTML_FOOTER = """
         <div class="modal-content text-dark" style="border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.15);">
           <div class="modal-header bg-dark text-white py-3">
             <div>
-               <h5 class="modal-title font-weight-bold"><i class="fas fa-bullhorn text-warning me-2"></i> {{ job.source }} Notification</h5>
+               <!-- 🛑 పాప్-అప్ హెడర్ లో కూడా ఛానెల్ పేరు రాదు -->
+               <h5 class="modal-title font-weight-bold"><i class="fas fa-bullhorn text-warning me-2"></i> SLNS Job Alert Notification</h5>
                <small class="text-white-50">Posted on: {{ job.created_at.strftime('%d-%m-%Y %I:%M %p') }}</small>
             </div>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body p-4" style="font-size: 15px; line-height: 1.7; white-space: pre-wrap; background: #fafafa; color: #1e293b;">{{ job.text }}</div>
           
-          <!-- 💬 కాంటాక్ట్ సపోర్ట్ బటన్స్ సెక్షన్ -->
+          <!-- 💬 కాంటాక్ట్ సపోర్ట్ బటన్స్ เซక్షన్ -->
           <div class="p-3 bg-light border-top text-center">
              <h6 class="font-weight-bold text-dark mb-3" style="font-size: 13px;">📞 ఈ ఉద్యోగానికి ఆన్‌లైన్ లో అప్లై చేయడానికి మా సపోర్ట్ టీమ్‌ను సంప్రదించండి:</h6>
              <div class="d-flex flex-wrap justify-content-center gap-3">
