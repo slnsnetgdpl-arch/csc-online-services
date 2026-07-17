@@ -121,6 +121,25 @@ HTML_HEADER = """
         .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25d366; color: white; padding: 12px 20px; border-radius: 30px; font-weight: bold; text-decoration: none; box-shadow: 0 4px 10px rgba(0,0,0,0.2); z-index: 9999; transition: transform 0.2s; }
         .whatsapp-float:hover { transform: scale(1.05); color: white; }
         
+        /* బ్రాండ్ లోగోల స్టైల్స్ */
+        .brand-logo-card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            font-weight: bold;
+            color: #2c5364;
+            border-bottom: 3px solid #203a43;
+            font-size: 13px;
+            transition: all 0.3s;
+        }
+        .brand-logo-card:hover {
+            transform: scale(1.05);
+            background: #203a43;
+            color: #fff;
+        }
+
         @media (max-width: 991px) {
             .wrapper { flex-direction: column; }
             #sidebar { min-width: 100%; max-width: 100%; min-height: auto; }
@@ -441,6 +460,50 @@ INDEX_CONTENT = """
                 <button type="submit" class="btn w-100 py-2 text-white" style="background: #ffb199; border: none;">Get Life Quote</button>
             </form>
         </div>
+    </div>
+</div>
+
+<!-- 🏢 TOP INSURANCE BRANDS LOGO SECTION -->
+<div class="row mt-5 mb-3">
+    <div class="col-12 text-center mb-4">
+        <h3 style="color: #2c5364; font-weight: 700; border-bottom: 3px solid #203a43; display: inline-block; padding-bottom: 10px;">🤝 Our Authorized Insurance Partners</h3>
+        <p class="text-muted">మేము భారతదేశంలో అత్యంత విశ్వసనీయమైన ఇన్సూరెన్స్ భాగస్వాములతో కలిసి సేవలను అందిస్తున్నాము.</p>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">🛡️ TATA AIA Life</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">🚗 TATA AIG General</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">📈 Bajaj Allianz</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">🩺 Niva Bupa</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">🏠 HDFC ERGO</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">🚙 ICICI Lombard</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">⭐ Star Health</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">🏦 SBI General</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">🏛️ Cholamandalam</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">🏢 United India</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">🤝 Universal Sompo</div>
+    </div>
+    <div class="col-6 col-md-3 mb-3">
+        <div class="brand-logo-card">💳 Axis Life</div>
     </div>
 </div>
 """
