@@ -102,7 +102,7 @@ class JobNotification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 # ----------------------------------------
-# 🔍 డేటా సింకింగ్ ఫంక్షన్ (ఛానెల్ పేర్లు లేకుండా)
+# 🔍 మల్టీ-ఫీడ్ సింకింగ్ ఫంక్షన్ (Bikki News వెబ్‌సైట్‌తో సహా)
 # ----------------------------------------
 def sync_and_clean_jobs():
     try:
@@ -112,11 +112,41 @@ def sync_and_clean_jobs():
     except Exception:
         db.session.rollback()
 
-    channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
-    
+
+    # 🌐 1. BIKKI NEWS వెబ్‌సైట్ ఫీడ్ స్క్రాపింగ్ (అఫీషియల్ RSS ఫీడ్ పద్ధతి - క్రాష్ అవ్వదు)
+    try:
+        bikki_url = "https://bikkinews.in/feed/"
+        bikki_req = urllib.request.Request(bikki_url, headers=headers)
+        bikki_xml = urllib.request.urlopen(bikki_req, timeout=3).read().decode('utf-8')
+        
+        # XML నుండి టైటిల్ మరియు డిస్క్రిప్షన్ కంటెంట్లను వేరు చేయడం
+        bikki_items = re.findall(r'<item>(.*?)</item>', bikki_xml, re.DOTALL)
+        for item in bikki_items[:4]:  # లేటెస్ట్ 4 పోస్టులు
+            b_title = re.search(r'<title>(.*?)</title>', item)
+            b_desc = re.search(r'<description>(.*?)</description>', item)
+            
+            if b_title and b_desc:
+                title_text = re.sub(r'<[^>]*>', '', b_title.group(1)).strip()
+                desc_text = re.sub(r'<[^>]*>', '', b_desc.group(1)).replace('<![CDATA[', '').replace(']]>', '').strip()
+                
+                # 🚫 మీ నిబంధనల ప్రకారం ఇతర ఫోన్ నంబర్లు మరియు వెబ్‌సైట్ లింకుల ఫిల్టర్
+                desc_text = re.sub(r'https?://\S+|www\.\S+', '', desc_text)
+                desc_text = re.sub(r'\b\d{10}\b', '[Protected]', desc_text)
+                
+                # డేటాబేస్ లో సేవ్ చేయడం
+                existing = JobNotification.query.filter_by(title=title_text).first()
+                if not existing and len(desc_text) > 30:
+                    new_bikki_job = JobNotification(source="JOB UPDATE", title=title_text, text=desc_text)
+                    db.session.add(new_bikki_job)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # ✈️ 2. పాత టెలిగ్రామ్ ఛానెల్స్ సమాచారం స్క్రాపింగ్
+    channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
     for channel in channels:
         try:
             url = f"https://tg.ihtw.site/s/{channel}"
@@ -124,9 +154,8 @@ def sync_and_clean_jobs():
             html = urllib.request.urlopen(req, timeout=3).read().decode('utf-8')
             messages = re.findall(r'<div class="tgme_widget_message_text[^">]*"([^>]*)>(.*?)</div>', html, re.DOTALL)
             
-            for msg_match in messages[:3]:
+            for msg_match in messages[:2]:
                 msg_content = msg_match[1]
-                
                 text = re.sub(r'<br\s*/?>', '\n', msg_content)
                 text = re.sub(r'<[^>]*>', '', text)
                 text = text.replace('&amp;', '&').replace('&quot;', '"').replace('&apos;', "'").strip()
@@ -134,7 +163,6 @@ def sync_and_clean_jobs():
                 if len(text) < 35:
                     continue
                 
-                # 🚫 ప్రొటెక్టెడ్ ఫిల్టర్స్
                 text = re.sub(r'https?://\S+|www\.\S+', '', text)
                 text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co|me|site)\b', '', text)
                 text = re.sub(r't\.me/\S+', '', text)
@@ -143,12 +171,9 @@ def sync_and_clean_jobs():
                 
                 first_line = text.split('\n')[0].strip()
                 title = first_line[:40] + "..." if len(first_line) > 40 else first_line
-                if not title or len(title) < 5:
-                    title = text[:40] + "..."
                 
                 existing = JobNotification.query.filter_by(text=text).first()
                 if not existing and text:
-                    # ఇక్కడ గ్రూప్ పేరుకు బదులు కేవలం జనరిక్ సిస్టమ్ లేబుల్ సేవ్ అవుతుంది
                     new_job = JobNotification(source="JOB UPDATE", title=title, text=text)
                     db.session.add(new_job)
             db.session.commit()
@@ -187,7 +212,7 @@ HTML_HEADER = """
         #sidebar-left ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
         
         #sidebar-right { min-width: 300px; max-width: 300px; background: #fff; min-height: calc(100vh - 56px); padding: 20px 12px; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e2e8f0; }
-        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13.5px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: all 0.2s; }
         #sidebar-right .job-link:hover { background: #fff3cd; color: #b45309; transform: translateX(3px); }
         
         #content { flex-grow: 1; padding: 30px; min-height: calc(100vh - 56px); background: #f8fafc; }
@@ -269,7 +294,6 @@ HTML_FOOTER = """
                 {% for job in job_updates %}
                     <a href="#" class="job-link" data-bs-toggle="modal" data-bs-target="#jobModal{{ job.id }}">
                         <div class="d-flex justify-content-between align-items-center mb-1">
-                            <!-- 🛑 ఇక్కడ గ్రూప్ పేరుకు బదులు కేవలం జనరిక్ బాక్స్ మాత్రమే కనిపిస్తుంది -->
                             <span class="badge bg-warning text-dark text-uppercase" style="font-size:9px; padding:2px 5px; font-weight:700;">{{ job.source }}</span>
                             <span class="text-muted" style="font-size:10px;"><i class="far fa-clock"></i> {{ job.created_at.strftime('%d-%b %I:%M %p') }}</span>
                         </div>
@@ -291,7 +315,6 @@ HTML_FOOTER = """
         <div class="modal-content text-dark" style="border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.15);">
           <div class="modal-header bg-dark text-white py-3">
             <div>
-               <!-- 🛑 పాప్-అప్ హెడర్ లో కూడా ఛానెల్ పేరు రాదు -->
                <h5 class="modal-title font-weight-bold"><i class="fas fa-bullhorn text-warning me-2"></i> SLNS Job Alert Notification</h5>
                <small class="text-white-50">Posted on: {{ job.created_at.strftime('%d-%m-%Y %I:%M %p') }}</small>
             </div>
@@ -299,7 +322,7 @@ HTML_FOOTER = """
           </div>
           <div class="modal-body p-4" style="font-size: 15px; line-height: 1.7; white-space: pre-wrap; background: #fafafa; color: #1e293b;">{{ job.text }}</div>
           
-          <!-- 💬 కాంటాక్ట్ సపోర్ట్ బటన్స్ เซక్షన్ -->
+          <!-- 💬 కాంటాక్ట్ సపోర్ట్ బటన్స్ సెక్షన్ -->
           <div class="p-3 bg-light border-top text-center">
              <h6 class="font-weight-bold text-dark mb-3" style="font-size: 13px;">📞 ఈ ఉద్యోగానికి ఆన్‌లైన్ లో అప్లై చేయడానికి మా సపోర్ట్ టీమ్‌ను సంప్రదించండి:</h6>
              <div class="d-flex flex-wrap justify-content-center gap-3">
