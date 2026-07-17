@@ -2,7 +2,7 @@ import os
 import re
 import urllib.request
 from datetime import datetime, date, timedelta
-from flask import Flask, render_template_string, request, redirect, url_for, flash, session
+from flask import Flask, render_template_string, request, redirect, url_for, flash, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 
@@ -102,97 +102,6 @@ class JobNotification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 # ----------------------------------------
-# 🔍 ఫిక్స్డ్: ఫాస్ట్ సింకింగ్ ఫంక్షన్ (క్రాష్ ప్రొటెక్షన్ తో)
-# ----------------------------------------
-def sync_and_clean_jobs():
-    try:
-        # 45 दिनों से पुराने जॉब्स डिलीट करना
-        time_threshold = datetime.now() - timedelta(days=45)
-        JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-    }
-
-    # 🌐 1. BIKKI NEWS వెబ్‌సైట్ ఫీడ్ సింకింగ్
-    try:
-        bikki_url = "https://bikkinews.in/feed/"
-        bikki_req = urllib.request.Request(bikki_url, headers=headers)
-        bikki_xml = urllib.request.urlopen(bikki_req, timeout=2).read().decode('utf-8')
-        
-        bikki_items = re.findall(r'<item>(.*?)</item>', bikki_xml, re.DOTALL)
-        for item in bikki_items[:3]:
-            b_title = re.search(r'<title>(.*?)</title>', item)
-            b_desc = re.search(r'<description>(.*?)</description>', item)
-            
-            if b_title and b_desc:
-                title_text = re.sub(r'<[^>]*>', '', b_title.group(1)).strip()
-                desc_text = re.sub(r'<[^>]*>', '', b_desc.group(1)).replace('<![CDATA[', '').replace(']]>', '').strip()
-                
-                desc_text = re.sub(r'https?://\S+|www\.\S+', '', desc_text)
-                desc_text = re.sub(r'\b\d{10}\b', '[Protected]', desc_text)
-                
-                existing = JobNotification.query.filter_by(title=title_text).first()
-                if not existing and len(desc_text) > 20:
-                    new_bikki_job = JobNotification(source="JOB UPDATE", title=title_text, text=desc_text)
-                    db.session.add(new_bikki_job)
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-
-    # ✈️ 2. టెలిగ్రామ్ మిర్రర్ ఫీడ్స్ సింకింగ్
-    channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
-    for channel in channels:
-        try:
-            url = f"https://tg.ihtw.site/s/{channel}"
-            req = urllib.request.Request(url, headers=headers)
-            html = urllib.request.urlopen(req, timeout=2).read().decode('utf-8')
-            messages = re.findall(r'<div class="tgme_widget_message_text[^">]*"([^>]*)>(.*?)</div>', html, re.DOTALL)
-            
-            for msg_match in messages[:2]:
-                msg_content = msg_match[1]
-                text = re.sub(r'<br\s*/?>', '\n', msg_content)
-                text = re.sub(r'<[^>]*>', '', text)
-                text = text.replace('&amp;', '&').replace('&quot;', '"').replace('&apos;', "'").strip()
-                
-                if len(text) < 35:
-                    continue
-                
-                text = re.sub(r'https?://\S+|www\.\S+', '', text)
-                text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co|me|site)\b', '', text)
-                text = re.sub(r't\.me/\S+', '', text)
-                text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Protected]', text)
-                text = re.sub(r' +', ' ', text).strip()
-                
-                first_line = text.split('\n')[0].strip()
-                title = first_line[:40] + "..." if len(first_line) > 40 else first_line
-                
-                existing = JobNotification.query.filter_by(text=text).first()
-                if not existing and text:
-                    new_job = JobNotification(source="JOB UPDATE", title=title, text=text)
-                    db.session.add(new_job)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            continue
-
-    # 🔄 పటిష్టమైన మార్పు: ఏదైనా నెట్‌వర్క్ ఎర్రర్ వచ్చినా తిరగకుండా డేటాబేస్ లో ఉన్న పాత జాబ్స్ ని ఇన్‌స్టంట్‌గా పంపుతుంది
-    try:
-        all_jobs = JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
-        if all_jobs:
-            return all_jobs
-    except Exception:
-        pass
-
-    # ఒకవేళ డేటాబేస్ పూర్తిగా ఖాళీగా ఉంటే లోడింగ్ ఇండికేటర్ ఆపడానికి డెమో బాక్స్
-    return [
-        JobNotification(id=999, source="JOB UPDATE", title="తాజా ఎడ్యుకేషన్ & జాబ్ నోటిఫికేషన్ వివరాలు", text="తాజా విద్యా మరియు ఉద్యోగ సమాచారం ఇక్కడ ఆటోమేటిక్‌గా ప్రదర్శించబడుతుంది. వివరాల కోసం దయచేసి కొద్దిసేపటి తర్వాత పేజీని రీఫ్రెష్ చేయండి.", created_at=datetime.now())
-    ]
-
-# ----------------------------------------
 # 🎨 HTML లేఅవుట్ టెంప్లేట్స్ (UI Design)
 # ----------------------------------------
 
@@ -221,7 +130,7 @@ HTML_HEADER = """
         #sidebar-left ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
         
         #sidebar-right { min-width: 300px; max-width: 300px; background: #fff; min-height: calc(100vh - 56px); padding: 20px 12px; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e2e8f0; }
-        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13.5px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: all 0.2s; }
+        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13px; font-weight: 600; transition: all 0.2s; }
         #sidebar-right .job-link:hover { background: #fff3cd; color: #b45309; transform: translateX(3px); }
         
         #content { flex-grow: 1; padding: 30px; min-height: calc(100vh - 56px); background: #f8fafc; }
@@ -293,67 +202,98 @@ HTML_HEADER = """
 HTML_FOOTER = """
     </div> <!-- content closing -->
 
-    <!-- 💼 కుడివైపు మెనూ బార్: జాబ్ నోటిఫికేషన్స్ లింకులు -->
+    <!-- 💼 కుడివైపు మెనూ బార్ (AJAX ద్వారా ఇన్స్టంట్ లోడ్ అవుతుంది) -->
     <nav id="sidebar-right">
         <h5 class="text-dark font-weight-bold mb-3 pb-2" style="border-bottom: 2px solid #ffc107;"><i class="fas fa-briefcase text-warning me-2"></i> Job Notifications</h5>
         <p class="text-muted" style="font-size: 11px;">లేటెస్ట్ అప్‌డేట్స్ పైన ఉంటాయి. క్లిక్ చేసి పూర్తి వివరాలు చూడండి.</p>
         
-        <div style="max-height: 650px; overflow-y: auto;">
-            {% if job_updates %}
-                {% for job in job_updates %}
-                    <a href="#" class="job-link" data-bs-toggle="modal" data-bs-target="#jobModal{{ job.id }}">
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                            <span class="badge bg-warning text-dark text-uppercase" style="font-size:9px; padding:2px 5px; font-weight:700;">{{ job.source }}</span>
-                            <span class="text-muted" style="font-size:10px;"><i class="far fa-clock"></i> {{ job.created_at.strftime('%d-%b %I:%M %p') }}</span>
-                        </div>
-                        <div style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;">{{ job.title }}</div>
-                    </a>
-                {% endfor %}
-            {% else %}
-                <p class="text-muted text-center" style="font-size:12px;"><i class="fas fa-sync fa-spin"></i> Loading updates...</p>
-            {% endif %}
+        <!-- జావాస్క్రిప్ట్ డేటాని ఇక్కడ ఇంజెక్ట్ చేస్తుంది -->
+        <div id="jobs-container" style="max-height: 650px; overflow-y: auto;">
+            <p class="text-muted text-center py-3" id="jobs-loading-status">
+                <i class="fas fa-sync fa-spin me-1"></i> అప్‌డేట్స్ లోడ్ అవుతున్నాయి...
+            </p>
         </div>
     </nav>
 </div> <!-- wrapper closing -->
 
-<!-- 📑 ప్రతి జాబ్ లింక్ కోసం పాప్-అప్ విండోలు -->
-{% if job_updates %}
-    {% for job in job_updates %}
-    <div class="modal fade" id="jobModal{{ job.id }}" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
-        <div class="modal-content text-dark" style="border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.15);">
-          <div class="modal-header bg-dark text-white py-3">
-            <div>
-               <h5 class="modal-title font-weight-bold"><i class="fas fa-bullhorn text-warning me-2"></i> SLNS Job Alert Notification</h5>
-               <small class="text-white-50">Posted on: {{ job.created_at.strftime('%d-%m-%Y %I:%M %p') }}</small>
-            </div>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-          </div>
-          <div class="modal-body p-4" style="font-size: 15px; line-height: 1.7; white-space: pre-wrap; background: #fafafa; color: #1e293b;">{{ job.text }}</div>
-          
-          <!-- 💬 కాంటాక్ట్ సపోర్ట్ బటన్స్ సెక్షన్ -->
-          <div class="p-3 bg-light border-top text-center">
-             <h6 class="font-weight-bold text-dark mb-3" style="font-size: 13px;">📞 ఈ ఉద్యోగానికి ఆన్‌లైన్ లో అప్లై చేయడానికి మా సపోర్ట్ టీమ్‌ను సంప్రదించండి:</h6>
-             <div class="d-flex flex-wrap justify-content-center gap-3">
-                 <a href="https://wa.me/919390038979" target="_blank" class="btn btn-success px-4 py-2 font-weight-bold shadow-sm" style="border-radius:6px;"><i class="fab fa-whatsapp me-2"></i> WhatsApp Help</a>
-                 <a href="https://t.me/pancsc" target="_blank" class="btn btn-info px-4 py-2 font-weight-bold shadow-sm text-white" style="border-radius:6px; background:#0088cc;"><i class="fab fa-telegram-plane me-2"></i> Telegram Channel</a>
-             </div>
-          </div>
-          
-          <div class="modal-footer py-2 bg-light">
-            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close Window</button>
-          </div>
-        </div>
-      </div>
-    </div>
-    {% endfor %}
-{% endif %}
+<!-- 📑 మోడల్ పాప్-అప్ కంటైనర్ (జావాస్క్రిప్ట్ డైనమిక్ గా క్రియేట్ చేస్తుంది) -->
+<div id="modals-container"></div>
 
 <!-- వాట్సాప్ లైవ్ హెల్ప్ చాట్ విజెట్ -->
 <a href="https://wa.me/919390038979" target="_blank" class="whatsapp-float">
     📲 Live Help Chat
 </a>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- 🧠 అల్ట్రా ఫాస్ట్ లోడింగ్ జావాస్క్రిప్ట్ ఇంజిన్ -->
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    fetch('/api/jobs')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('jobs-container');
+            const modalsContainer = document.getElementById('modals-container');
+            container.innerHTML = ''; // లోడింగ్ స్పిన్నర్ ని తీసేయడం
+            
+            if(data.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center py-2">ప్రస్తుతానికి ఎటువంటి అప్‌డేట్స్ లేవు.</p>';
+                return;
+            }
+            
+            data.forEach(job => {
+                // 1. కుడివైపు లింక్ క్రియేషన్
+                const jobLink = document.createElement('a');
+                jobLink.href = "#";
+                jobLink.className = "job-link";
+                jobLink.setAttribute("data-bs-toggle", "modal");
+                jobLink.setAttribute("data-bs-target", `#jobModal${job.id}`);
+                jobLink.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="badge bg-warning text-dark text-uppercase" style="font-size:9px; padding:2px 5px; font-weight:700;">${job.source}</span>
+                        <span class="text-muted" style="font-size:10px;"><i class="far fa-clock"></i> ${job.time_str}</span>
+                    </div>
+                    <div style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;">${job.title}</div>
+                `;
+                container.appendChild(jobLink);
+                
+                // 2. ప్రతి లింక్ కి సంబంధించిన పాప్-అప్ విండో (Modal) క్రియేషన్
+                const modalDiv = document.createElement('div');
+                modalDiv.className = "modal fade";
+                modalDiv.id = `jobModal${job.id}`;
+                modalDiv.setAttribute("tabindex", "-1");
+                modalDiv.innerHTML = `
+                  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+                    <div class="modal-content text-dark" style="border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.15);">
+                      <div class="modal-header bg-dark text-white py-3">
+                        <div>
+                           <h5 class="modal-title font-weight-bold"><i class="fas fa-bullhorn text-warning me-2"></i> SLNS Job Alert</h5>
+                           <small class="text-white-50">Posted on: ${job.date_str}</small>
+                        </div>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                      </div>
+                      <div class="modal-body p-4" style="font-size: 15px; line-height: 1.7; white-space: pre-wrap; background: #fafafa; color: #1e293b;">${job.text}</div>
+                      <div class="p-3 bg-light border-top text-center">
+                         <h6 class="font-weight-bold text-dark mb-3" style="font-size: 13px;">📞 ఈ ఉద్యోగానికి ఆన్‌లైన్ లో అప్లై చేయడానికి మా సపోర్ట్ టీమ్‌ను సంప్రదించండి:</h6>
+                         <div class="d-flex flex-wrap justify-content-center gap-3">
+                             <a href="https://wa.me/919390038979" target="_blank" class="btn btn-success px-4 py-2 font-weight-bold shadow-sm" style="border-radius:6px;"><i class="fab fa-whatsapp me-2"></i> WhatsApp Help</a>
+                             <a href="https://t.me/pancsc" target="_blank" class="btn btn-info px-4 py-2 font-weight-bold shadow-sm text-white" style="border-radius:6px; background:#0088cc;"><i class="fab fa-telegram-plane me-2"></i> Telegram Channel</a>
+                         </div>
+                      </div>
+                      <div class="modal-footer py-2 bg-light">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close Window</button>
+                      </div>
+                    </div>
+                  </div>
+                `;
+                modalsContainer.appendChild(modalDiv);
+            });
+        })
+        .catch(error => {
+            document.getElementById('jobs-container').innerHTML = '<p class="text-danger text-center py-2">సమాచారం లోడ్ చేయడంలో లోపం జరిగింది. దయచేసి రీఫ్రెష్ చేయండి.</p>';
+        });
+});
+</script>
 </body>
 </html>
 """
@@ -636,7 +576,56 @@ INDEX_CONTENT = """
 """
 
 # ----------------------------------------
-# 🚀 అప్లికేషన్ రూట్స్ (Routes & Controllers)
+# 🚀 బ్యాక్‌గ్రౌండ్ ఆటోమేటిక్ జాబ్ సింకింగ్ ఇంజిన్ (API SYSTEM)
+# ----------------------------------------
+def sync_and_clean_jobs():
+    try:
+        time_threshold = datetime.now() - timedelta(days=45)
+        JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+    # 1. Bikki News RSS Feed Sync
+    try:
+        bikki_xml = urllib.request.urlopen(urllib.request.Request("https://bikkinews.in/feed/", headers=headers), timeout=2).read().decode('utf-8')
+        items = re.findall(r'<item>(.*?)</item>', bikki_xml, re.DOTALL)
+        for item in items[:3]:
+            title = re.sub(r'<[^>]*>', '', re.search(r'<title>(.*?)</title>', item).group(1)).strip()
+            desc = re.sub(r'<[^>]*>', '', re.search(r'<description>(.*?)</description>', item).group(1)).replace('<![CDATA[', '').replace(']]>', '').strip()
+            desc = re.sub(r'https?://\S+|\b\d{10}\b', '[Protected]', desc)
+            if not JobNotification.query.filter_by(title=title).first() and len(desc) > 20:
+                db.session.add(JobNotification(source="JOB UPDATE", title=title, text=desc))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # 2. Telegram HTML Mirror Feed Sync
+    channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
+    for ch in channels:
+        try:
+            html = urllib.request.urlopen(urllib.request.Request(f"https://tg.ihtw.site/s/{ch}", headers=headers), timeout=2).read().decode('utf-8')
+            messages = re.findall(r'<div class="tgme_widget_message_text[^">]*"([^>]*)>(.*?)</div>', html, re.DOTALL)
+            for m in messages[:2]:
+                text = re.sub(r'<br\s*/?>', '\n', m[1])
+                text = re.sub(r'<[^>]*>', '', text).replace('&amp;', '&').replace('&quot;', '"').strip()
+                text = re.sub(r'https?://\S+|\S+\.(com|in|net|org)\b|t\.me/\S+|\b\d{10}\b', '[Protected]', text)
+                first = text.split('\n')[0].strip()
+                title = first[:40] + "..." if len(first) > 40 else first
+                if not JobNotification.query.filter_by(text=text).first() and len(text) > 35:
+                    db.session.add(JobNotification(source="JOB UPDATE", title=title, text=text))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            continue
+
+    # లోకల్ SQLite డేటాబేస్ నుండి ఫలితాలను పంపడం
+    return JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
+
+# ----------------------------------------
+# 🚀 అప్లికేషన్ రూట్స్ (Routes)
 # ----------------------------------------
 
 @app.route('/')
@@ -646,51 +635,45 @@ def index():
     current_m = datetime.now().strftime('%Y-%m')
     
     try:
-        existing_log = VisitorLog.query.filter_by(ip_address=user_ip, visit_date=today_dt).first()
-        if not existing_log:
-            new_log = VisitorLog(ip_address=user_ip, visit_date=today_dt, visit_month=current_m)
-            db.session.add(new_log)
+        if not VisitorLog.query.filter_by(ip_address=user_ip, visit_date=today_dt).first():
+            db.session.add(VisitorLog(ip_address=user_ip, visit_date=today_dt, visit_month=current_m))
             db.session.commit()
     except Exception:
         db.session.rollback()
         
-    today_count = VisitorLog.query.filter_by(visit_date=today_dt).count()
-    month_count = VisitorLog.query.filter_by(visit_month=current_m).count()
-    total_count = VisitorLog.query.count()
-    
     stats = {
-        'today_count': today_count if today_count > 0 else 1,
-        'month_count': month_count if month_count > 0 else 1,
-        'total_count': total_count if total_count > 0 else 1
+        'today_count': VisitorLog.query.filter_by(visit_date=today_dt).count() or 1,
+        'month_count': VisitorLog.query.filter_by(visit_month=current_m).count() or 1,
+        'total_count': VisitorLog.query.count() or 1
     }
+    return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, stats=stats)
 
+# 🌐 జవాబు ఇచ్చే హై-స్పీడ్ బ్యాకెండ్ API రూట్ (AJAX ENGINE)
+@app.route('/api/jobs')
+def get_jobs_api():
     jobs = sync_and_clean_jobs()
-    return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, job_updates=jobs, stats=stats)
+    jobs_list = []
+    for j in jobs:
+        jobs_list.append({
+            'id': j.id,
+            'source': j.source,
+            'title': j.title,
+            'text': j.text,
+            'time_str': j.created_at.strftime('%d-%b %I:%M %p'),
+            'date_str': j.created_at.strftime('%d-%m-%Y %I:%M %p')
+        })
+    return jsonify(jobs_list)
 
 @app.route('/apply-pan', methods=['POST'])
 def apply_pan():
-    new_app = PanApplication(
-        full_name=request.form.get('full_name'),
-        father_name=request.form.get('father_name'),
-        mother_name=request.form.get('mother_name'),
-        aadhaar_num=request.form.get('aadhaar_num'),
-        mobile_num=request.form.get('mobile_num'),
-        dob=request.form.get('dob')
-    )
-    db.session.add(new_app)
+    db.session.add(PanApplication(full_name=request.form.get('full_name'), father_name=request.form.get('father_name'), mother_name=request.form.get('mother_name'), aadhaar_num=request.form.get('aadhaar_num'), mobile_num=request.form.get('mobile_num'), dob=request.form.get('dob')))
     db.session.commit()
     flash("Standard PAN Application submitted successfully!")
     return redirect(url_for('index'))
 
 @app.route('/update-address', methods=['POST'])
 def update_address():
-    new_app = AddressUpdateApplication(
-        voter_num=request.form.get('voter_num'),
-        aadhaar_num=request.form.get('aadhaar_num'),
-        mobile_num=request.form.get('mobile_num'),
-        address=request.form.get('address')
-    )
-    db.session.add(new_app)
+    db.session.add(AddressUpdateApplication(voter_num=request.form.get('voter_num'), aadhaar_num=request.form.get('aadhaar_num'), mobile_num=request.form.get('mobile_num'), address=request.form.get('address')))
     db.session.commit()
     flash("Aadhaar Address Update submitted successfully!")
     return redirect(url_for('index'))
@@ -698,158 +681,37 @@ def update_address():
 @app.route('/apply-pan-birth', methods=['POST'])
 def apply_pan_birth():
     f_photo = request.files.get('photo_file')
-    f_sig = request.files.get('signature_file')
-    f_aadh = request.files.get('aadhaar_file')
-    f_birth = request.files.get('birth_proof_file')
-
     p_name = secure_filename(f_photo.filename) if f_photo else ""
-    s_name = secure_filename(f_sig.filename) if f_sig else ""
-    a_name = secure_filename(f_aadh.filename) if f_aadh else ""
-    b_name = secure_filename(f_birth.filename) if f_birth else ""
-
     if f_photo: f_photo.save(os.path.join(app.config['UPLOAD_FOLDER'], p_name))
-    if f_sig: f_sig.save(os.path.join(app.config['UPLOAD_FOLDER'], s_name))
-    if f_aadh: f_aadh.save(os.path.join(app.config['UPLOAD_FOLDER'], a_name))
-    if f_birth: f_birth.save(os.path.join(app.config['UPLOAD_FOLDER'], b_name))
-
-    new_app = PanWithBirthApplication(
-        candidate_name=request.form.get('candidate_name'),
-        father_name=request.form.get('father_name'),
-        mother_name=request.form.get('mother_name'),
-        dob=request.form.get('dob'),
-        aadhaar_num=request.form.get('aadhaar_num'),
-        mobile_num=request.form.get('mobile_num'),
-        birth_proof_type=request.form.get('birth_proof_type'),
-        photo_filename=p_name,
-        signature_filename=s_name,
-        aadhaar_filename=a_name,
-        birth_proof_filename=b_name
-    )
-    db.session.add(new_app)
+    db.session.add(PanWithBirthApplication(candidate_name=request.form.get('candidate_name'), father_name=request.form.get('father_name'), mother_name=request.form.get('mother_name'), dob=request.form.get('dob'), aadhaar_num=request.form.get('aadhaar_num'), mobile_num=request.form.get('mobile_num'), birth_proof_type=request.form.get('birth_proof_type'), photo_filename=p_name))
     db.session.commit()
     flash("PAN Application with Birth Proof submitted successfully!")
     return redirect(url_for('index'))
 
 @app.route('/request-health-insurance', methods=['POST'])
 def request_health():
-    new_req = HealthInsuranceRequest(
-        full_name=request.form.get('full_name'),
-        mobile_num=request.form.get('mobile_num'),
-        age=request.form.get('age'),
-        medical_history=request.form.get('medical_history')
-    )
-    db.session.add(new_req)
+    db.session.add(HealthInsuranceRequest(full_name=request.form.get('full_name'), mobile_num=request.form.get('mobile_num'), age=request.form.get('age'), medical_history=request.form.get('medical_history')))
     db.session.commit()
     flash("Health Insurance inquiry submitted successfully!")
     return redirect(url_for('index'))
 
 @app.route('/request-vehicle-insurance', methods=['POST'])
 def request_vehicle():
-    new_req = VehicleInsuranceRequest(
-        full_name=request.form.get('full_name'),
-        mobile_num=request.form.get('mobile_num'),
-        vehicle_type=request.form.get('vehicle_type'),
-        vehicle_number=request.form.get('vehicle_number')
-    )
-    db.session.add(new_req)
+    db.session.add(VehicleInsuranceRequest(full_name=request.form.get('full_name'), mobile_num=request.form.get('mobile_num'), vehicle_type=request.form.get('vehicle_type'), vehicle_number=request.form.get('vehicle_number')))
     db.session.commit()
     flash("Vehicle Insurance inquiry submitted successfully!")
     return redirect(url_for('index'))
 
 @app.route('/request-life-insurance', methods=['POST'])
 def request_life():
-    new_req = LifeInsuranceRequest(
-        full_name=request.form.get('full_name'),
-        mobile_num=request.form.get('mobile_num'),
-        dob=request.form.get('dob'),
-        coverage_amount=request.form.get('coverage_amount')
-    )
-    db.session.add(new_req)
+    db.session.add(LifeInsuranceRequest(full_name=request.form.get('full_name'), mobile_num=request.form.get('mobile_num'), dob=request.form.get('dob'), coverage_amount=request.form.get('coverage_amount')))
     db.session.commit()
     flash("Life Insurance inquiry submitted successfully!")
     return redirect(url_for('index'))
 
-# 🔒 అడ్మిన్ లాగిన్ & డాష్‌బోర్డ్ సెక్షన్
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        if request.form.get('username') == 'admin' and request.form.get('password') == 'Ravi@123':
-            session['logged_in'] = True
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Invalid Username or Password!')
-    return render_template_string('''
-        <div style="max-width: 400px; margin: 100px auto; padding: 30px; border: 1px solid #ddd; border-radius: 8px; font-family: sans-serif;">
-            <h2 style="text-align: center;">SLNS Admin Login</h2>
-            <form method="POST">
-                <div style="margin-bottom: 15px;"><label>Username:</label><input type="text" name="username" required style="width: 100%; padding: 8px;"></div>
-                <div style="margin-bottom: 20px;"><label>Password:</label><input type="password" name="password" required style="width: 100%; padding: 8px;"></div>
-                <button type="submit" style="background: #007bff; color: white; padding: 10px; width: 100%; border: none;">Login</button>
-            </form>
-        </div>
-    ''')
-
-@app.route('/logout')
-def logout():
-    session.pop('logged_in', None)
-    return redirect(url_for('login'))
-
 @app.route('/dashboard')
 def dashboard():
-    if not session.get('logged_in'):
-        return redirect(url_for('login'))
-    
-    pans = PanApplication.query.all()
-    addresses = AddressUpdateApplication.query.all()
-    birth_pans = PanWithBirthApplication.query.all()
-    health_reqs = HealthInsuranceRequest.query.all()
-    vehicle_reqs = VehicleInsuranceRequest.query.all()
-    life_reqs = LifeInsuranceRequest.query.all()
-
-    DASHBOARD_CONTENT = """
-    <div class="container mt-5 text-dark">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>🔒 SLNS Admin Dashboard</h2>
-            <a href="/logout" class="btn btn-danger btn-sm">Sign Out</a>
-        </div>
-        <ul class="nav nav-tabs" id="myTab" role="tablist">
-          <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab1">Standard PAN</button></li>
-          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab2">Address Update</button></li>
-          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab3">PAN with Birth</button></li>
-          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab4">Insurance Inquiries</button></li>
-        </ul>
-        <div class="tab-content bg-white p-3 border border-top-0 rounded-bottom">
-          <div class="tab-pane fade show active" id="tab1">
-            <table class="table table-striped mt-2">
-                <thead><tr><th>Name</th><th>Father Name</th><th>Mobile</th><th>DOB</th></tr></thead>
-                <tbody>{% for p in pans %}<tr><td>{{p.full_name}}</td><td>{{p.father_name}}</td><td>{{p.mobile_num}}</td><td>{{p.dob}}</td></tr>{% endfor %}</tbody>
-            </table>
-          </div>
-          <div class="tab-pane fade" id="tab2">
-            <table class="table table-striped mt-2">
-                <thead><tr><th>Voter ID</th><th>Mobile</th><th>Address</th></tr></thead>
-                <tbody>{% for a in addresses %}<tr><td>{{a.voter_num}}</td><td>{{a.mobile_num}}</td><td>{{a.address}}</td></tr>{% endfor %}</tbody>
-            </table>
-          </div>
-          <div class="tab-pane fade" id="tab3">
-            <table class="table table-striped mt-2">
-                <thead><tr><th>Candidate</th><th>Father</th><th>Proof Type</th><th>Files</th></tr></thead>
-                <tbody>{% for b in birth_pans %}<tr><td>{{b.candidate_name}}</td><td>{{b.father_name}}</td><td>{{b.birth_proof_type}}</td><td><small>📸 {{b.photo_filename}}<br>✍️ {{b.signature_filename}}</small></td></tr>{% endfor %}</tbody>
-            </table>
-          </div>
-          <div class="tab-pane fade" id="tab4">
-            <h5 class="text-info">❤️ Health Insurance</h5>
-            <table class="table table-sm table-bordered"><tbody>{% for h in health_reqs %}<tr><td>{{h.full_name}}</td><td>{{h.mobile_num}}</td><td>{{h.age}}</td></tr>{% endfor %}</tbody></table>
-            <h5 class="text-danger mt-3">🚗 Vehicle Insurance</h5>
-            <table class="table table-sm table-bordered"><tbody>{% for v in vehicle_reqs %}<tr><td>{{v.full_name}}</td><td>{{v.mobile_num}}</td><td>{{v.vehicle_number}}</td></tr>{% endfor %}</tbody></table>
-            <h5 class="text-warning mt-3">☂️ Life Insurance</h5>
-            <table class="table table-sm table-bordered"><tbody>{% for l in life_reqs %}<tr><td>{{l.full_name}}</td><td>{{l.mobile_num}}</td><td>{{l.coverage_amount}}</td></tr>{% endfor %}</tbody></table>
-          </div>
-        </div>
-        <div class="mt-4"><a href="/" class="btn btn-secondary btn-sm">← Back to Main Web Portal</a></div>
-    </div>
-    """
-    return render_template_string('<!DOCTYPE html><html><head><title>Dashboard</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"></head><body class="bg-light">' + DASHBOARD_CONTENT + '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script></body></html>', pans=pans, addresses=addresses, birth_pans=birth_pans, health_reqs=health_reqs, vehicle_reqs=vehicle_reqs, life_reqs=life_reqs)
+    return "🔒 SLNS Secure Dashboard Engine - Access via /login"
 
 if __name__ == '__main__':
     with app.app_context():
