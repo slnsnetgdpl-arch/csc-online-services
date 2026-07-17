@@ -75,19 +75,28 @@ HTML_HEADER = """
     <title>SLNS Online & Insurance Services</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
-        body { background: #f0f4f8; font-family: 'Segoe UI', sans-serif; color: #333; }
+        body { background: #f0f4f8; font-family: 'Segoe UI', sans-serif; color: #333; position: relative; min-height: 100vh; }
         .navbar { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364) !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
         .card { box-shadow: 0 4px 8px rgba(0,0,0,0.05); border: none; margin-bottom: 25px; }
         .form-label { font-weight: 600; }
         .note-box { color: #b58900; background: #fff3cd; padding: 10px; border-radius: 5px; font-size: 14px; border-left: 4px solid #ffc107; }
+        .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25d366; color: white; padding: 12px 20px; border-radius: 30px; font-weight: bold; text-decoration: none; box-shadow: 0 4px 10px rgba(0,0,0,0.2); z-index: 9999; transition: transform 0.2s; }
+        .whatsapp-float:hover { transform: scale(1.05); color: white; }
     </style>
 </head>
 <body>
 <nav class="navbar navbar-dark navbar-expand-lg">
     <div class="container">
         <a class="navbar-brand font-weight-bold" href="/">🛡️ SLNS ONLINE & INSURANCE SERVICES</a>
-        <div class="ms-auto">
-            <a href="/dashboard" class="btn btn-outline-light btn-sm">🔒 Admin Dashboard</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="ms-auto d-flex align-items-center gap-2 mt-2 mt-lg-0">
+                <a href="https://t.me/pancsc" target="_blank" class="btn btn-info btn-sm text-white">✈️ Join Telegram</a>
+                <a href="https://whatsapp.com/channel/0029VbCut5E4o7qH8GUgjO0s" target="_blank" class="btn btn-success btn-sm">💬 WhatsApp Channel</a>
+                <a href="/dashboard" class="btn btn-outline-light btn-sm">🔒 Dashboard</a>
+            </div>
         </div>
     </div>
 </nav>
@@ -106,6 +115,10 @@ HTML_HEADER = """
 
 HTML_FOOTER = """
 </div>
+<!-- వాట్సాప్ లైవ్ హెల్ప్ చాట్ విజెట్ -->
+<a href="https://wa.me/919390038979" target="_blank" class="whatsapp-float">
+    📲 Live Help Chat
+</a>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
@@ -116,7 +129,7 @@ INDEX_CONTENT = """
     <!-- ఫారమ్ 1: PAN Card Service Standard -->
     <div class="col-md-6">
         <div class="card p-4">
-            <h4 class="text-primary mb-3">📝 1. PAN Card Service Application</h4>
+            <h4 class="text-primary mb-3"> 1. PAN Card Service Application</h4>
             <form action="/apply-pan" method="POST">
                 <div class="mb-3">
                     <label class="form-label">A. Full Name of the Person</label>
