@@ -1,4 +1,6 @@
 import os
+import re
+import urllib.request
 from datetime import datetime
 from flask import Flask, render_template_string, request, redirect, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
@@ -87,6 +89,52 @@ class LifeInsuranceRequest(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ----------------------------------------
+# 🔍 టెలిగ్రామ్ డేటా స్క్రాపర్ & ఫిల్టర్ ఫంక్షన్
+# ----------------------------------------
+def get_clean_telegram_jobs():
+    channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
+    clean_updates = []
+    
+    for channel in channels:
+        try:
+            # టెలిగ్రామ్ పబ్లిక్ వెబ్ ప్రివ్యూ నుండి డేటా తెచ్చుకోవడం
+            url = f"https://t.me/s/{channel}"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            html = urllib.request.urlopen(req, timeout=5).read().decode('utf-8')
+            
+            # మెసేజ్ టెక్స్ట్‌లను మాత్రమే వేరు చేయడం
+            messages = re.findall(r'<div class="tgme_widget_message_text[^">]*">(.*?)</div>', html, re.DOTALL)
+            
+            for msg in messages[:3]: # ప్రతి ఛానెల్ నుండి లేటెస్ట్ 3 మెసేజ్‌లు మాత్రమే
+                # HTML ట్యాగ్‌లు తీసేయడం
+                text = re.sub(r'<[^>]*>', '', msg)
+                text = text.replace('&amp;', '&').replace('&quot;', '"').strip()
+                
+                if len(text) < 40: # మరీ చిన్నగా ఉన్న మెసేజ్లు వదిలేయడం
+                    continue
+                
+                # 🚫 1. లింకులు తొలగించే ఫిల్టర్ (http, https, t.me, domains)
+                text = re.sub(r'https?://\S+|www\.\S+', '', text)
+                text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co)\b', '', text)
+                text = re.sub(r't\.me/\S+', '', text)
+                
+                # 🚫 2. 10 అంకెల మొబైల్ నంబర్లు తొలగించే ఫిల్టర్
+                text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Number Removed]', text)
+                
+                # డబుల్ స్పేస్‌లు క్లీన్ చేయడం
+                text = re.sub(r'\s+', ' ', text).strip()
+                
+                if text and text not in [j['text'] for j in clean_updates]:
+                    clean_updates.append({
+                        'source': channel.upper(),
+                        'text': text
+                    })
+        except Exception:
+            continue
+            
+    return clean_updates[:10] # గరిష్టంగా టాప్ 10 క్లీన్ నోటిఫికేషన్లు ప్రదర్శిస్తుంది
+
+# ----------------------------------------
 # 🎨 HTML లేఅవుట్ టెంప్లేట్స్ (UI Design)
 # ----------------------------------------
 
@@ -134,11 +182,7 @@ HTML_HEADER = """
             font-size: 14px;
             transition: all 0.3s;
         }
-        .brand-logo-card:hover {
-            transform: translateY(-4px);
-            background: #203a43;
-            color: #fff;
-        }
+        .brand-logo-card:hover { transform: translateY(-4px); background: #203a43; color: #fff; }
 
         @media (max-width: 991px) {
             .wrapper { flex-direction: column; }
@@ -178,6 +222,9 @@ HTML_HEADER = """
             </li>
             <li>
                 <a href="#birth-pan"><i class="fas fa-certificate me-2"></i> 3. PAN with Birth Proof</a>
+            </li>
+            <li>
+                <a href="#job-updates" style="color: #ffc107;"><i class="fas fa-briefcase me-2"></i> 💼 Job Notifications</a>
             </li>
             <hr style="border-color: rgba(255,255,255,0.15); margin: 10px 0;">
             <div class="px-3 py-1 text-info" style="font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">Insurance Services</div>
@@ -221,6 +268,31 @@ HTML_FOOTER = """
 """
 
 INDEX_CONTENT = """
+<!-- 💼 AUTOMATIC JOB NOTIFICATIONS SECTION (టెలిగ్రామ్ ఫిల్టర్డ్ అప్‌డేట్స్) -->
+<div class="row mb-5" id="job-updates">
+    <div class="col-12">
+        <div class="card p-4" style="background: #fff; border-left: 6px solid #ffc107; box-shadow: 0 4px 15px rgba(0,0,0,0.08);">
+            <h4 class="text-dark font-weight-bold mb-3"><i class="fas fa-bullhorn text-warning me-2"></i> Latest Job & Education Updates (ఆటోమేటిక్ అప్‌డేట్స్)</h4>
+            <p class="text-muted mb-4" style="font-size:14px;">వివిధ విశ్వసనీయ టెలిగ్రామ్ ఛానెల్స్ నుండి సేకరించబడిన తాజా విద్యా మరియు ఉద్యోగ సమాచారం కింద ప్రదర్శించబడుతోంది (ఇతర లింకులు మరియు ఫోన్ నంబర్లు నిరోధించబడినవి).</p>
+            
+            <div style="max-height: 400px; overflow-y: auto; padding-right: 10px;">
+                {% if job_updates %}
+                    {% for job in job_updates %}
+                        <div class="p-3 mb-3 rounded" style="background: #f8f9fa; border-bottom: 2px solid #e9ecef;">
+                            <span class="badge bg-secondary mb-2" style="font-size:11px;">📡 Source: {{ job.source }}</span>
+                            <p class="mb-0 text-dark" style="font-size: 14px; line-height: 1.6; font-weight: 500;">{{ job.text }}</p>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-3 text-muted">
+                        <i class="fas fa-sync fa-spin me-2"></i> నోటిఫికేషన్లు లోడ్ అవుతున్నాయి... దయచేసి పేజీని రీఫ్రెష్ చేయండి.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row">
     <!-- ఫారమ్ 1: PAN Card Service Standard -->
     <div class="col-md-6" id="standard-pan">
@@ -514,7 +586,9 @@ INDEX_CONTENT = """
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER)
+    # లోడ్ అయిన ప్రతిసారీ టెలిగ్రామ్ ఛానెల్స్ నుండి క్లీన్ జాబ్ డేటా తెచ్చుకుంటుంది
+    jobs = get_clean_telegram_jobs()
+    return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, job_updates=jobs)
 
 @app.route('/apply-pan', methods=['POST'])
 def apply_pan():
