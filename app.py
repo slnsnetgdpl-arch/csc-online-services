@@ -102,10 +102,10 @@ class JobNotification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 # ----------------------------------------
-# 🔍 టైమ్-ఆప్టిమైజ్డ్ మల్టీ సోర్స్ సింకింగ్ ఫంక్షన్
+# 🔍 వీక్లీ-సింక్ అండ్ ఫోర్స్ లోడింగ్ ఇంజిన్
 # ----------------------------------------
 def sync_and_clean_jobs():
-    # 🛑 1. 45 రోజుల ఆటో-డిలీట్ రూల్
+    # 🛑 1. 45 రోజుల పాత డేటా ఆటోమేటిక్ డిలీట్ రూల్
     try:
         time_threshold = datetime.now() - timedelta(days=45)
         JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
@@ -113,60 +113,75 @@ def sync_and_clean_jobs():
     except Exception:
         db.session.rollback()
 
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    
-    # 📅 టైమ్ విండో సెటప్: మొదటి రోజా (ఖాళీగా ఉందా) లేక రేపటి నుండి 24 గంటల అప్‌డేట్సా అని చెక్ చేయడం
-    db_count = JobNotification.query.count()
-    if db_count == 0:
-        # మొదటి రోజు కాబట్టి గత 7 రోజుల డేటా సేకరిస్తుంది
-        time_filter_days = 7
-    else:
-        # రేపటి నుండి (18th July) కేవలం గడిచిన 24 గంటల (1 రోజు) డేటా మాత్రమే సేకరిస్తుంది
-        time_filter_days = 1
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    }
 
-    # 🌐 A. Bikki News Website Feed Sync
+    # 🌐 A. BIKKI NEWS వెబ్‌సైట్ నుండి డేటా సేకరించడం (టాప్ 15 పోస్టులు)
     try:
-        bikki_xml = urllib.request.urlopen(urllib.request.Request("https://bikkinews.in/feed/", headers=headers), timeout=3).read().decode('utf-8')
-        items = re.findall(r'<item>(.*?)</item>', bikki_xml, re.DOTALL)
-        for item in items[:10]:
-            title = re.sub(r'<[^>]*>', '', re.search(r'<title>(.*?)</title>', item).group(1)).strip()
-            desc = re.sub(r'<[^>]*>', '', re.search(r'<description>(.*?)</description>', item).group(1)).replace('<![CDATA[', '').replace(']]>', '').strip()
+        bikki_url = "https://bikkinews.in/feed/"
+        bikki_req = urllib.request.Request(bikki_url, headers=headers)
+        bikki_xml = urllib.request.urlopen(bikki_req, timeout=4).read().decode('utf-8')
+        
+        bikki_items = re.findall(r'<item>(.*?)</item>', bikki_xml, re.DOTALL)
+        for item in bikki_items[:15]: 
+            b_title = re.search(r'<title>(.*?)</title>', item)
+            b_desc = re.search(r'<description>(.*?)</description>', item)
             
-            desc = re.sub(r'https?://\S+|\b\d{10}\b', '[Protected]', desc)
-            
-            existing = JobNotification.query.filter_by(title=title).first()
-            if not existing and len(desc) > 20:
-                # కేవలం టైమ్ విండో లోపు ఉన్న తాజా పోస్టులు మాత్రమే సేవ్ అవుతాయి
-                db.session.add(JobNotification(source="JOB UPDATE", title=title, text=desc))
+            if b_title and b_desc:
+                title_text = re.sub(r'<[^>]*>', '', b_title.group(1)).strip()
+                desc_text = re.sub(r'<[^>]*>', '', b_desc.group(1)).replace('<![CDATA[', '').replace(']]>', '').strip()
+                
+                # ప్రొటెక్టెడ్ ఫిల్టర్స్
+                desc_text = re.sub(r'https?://\S+|www\.\S+', '', desc_text)
+                desc_text = re.sub(r'\b\d{10}\b', '[Protected]', desc_text)
+                
+                existing = JobNotification.query.filter_by(title=title_text).first()
+                if not existing and len(desc_text) > 20:
+                    db.session.add(JobNotification(source="JOB UPDATE", title=title_text, text=desc_text))
         db.session.commit()
     except Exception:
         db.session.rollback()
 
-    # ✈️ B. టెలిగ్రామ్ ఫీడ్స్ సింకింగ్
+    # ✈️ B. టెలిగ్రామ్ ఫీడ్స్ నుండి డేటా సేకరించడం (వారం రోజుల బ్యాక్‌లాగ్‌తో)
     channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
-    for ch in channels:
+    for channel in channels:
         try:
-            html = urllib.request.urlopen(urllib.request.Request(f"https://tg.ihtw.site/s/{ch}", headers=headers), timeout=3).read().decode('utf-8')
+            url = f"https://tg.ihtw.site/s/{channel}"
+            req = urllib.request.Request(url, headers=headers)
+            html = urllib.request.urlopen(req, timeout=4).read().decode('utf-8')
             messages = re.findall(r'<div class="tgme_widget_message_text[^">]*"([^>]*)>(.*?)</div>', html, re.DOTALL)
             
-            # టైమ్ విండో ఆధారంగా మెసేజ్ రికార్డుల పరిమితి
-            max_posts = 6 if time_filter_days == 7 else 3
-            for m in messages[:max_posts]:
-                text = re.sub(r'<br\s*/?>', '\n', m[1])
-                text = re.sub(r'<[^>]*>', '', text).replace('&amp;', '&').replace('&quot;', '"').strip()
-                text = re.sub(r'https?://\S+|\S+\.(com|in|net|org)\b|t\.me/\S+|\b\d{10}\b', '[Protected]', text)
+            # మొదటి రోజు/వారం అప్‌డేట్స్ కోసం ప్రతి ఛానెల్ నుండి గరిష్టంగా 6 లేటెస్ట్ పోస్టులను లోడ్ చేస్తుంది
+            for msg_match in messages[:6]:
+                msg_content = msg_match[1]
+                text = re.sub(r'<br\s*/?>', '\n', msg_content)
+                text = re.sub(r'<[^>]*>', '', text)
+                text = text.replace('&amp;', '&').replace('&quot;', '"').replace('&apos;', "'").strip()
                 
-                first = text.split('\n')[0].strip()
-                title = first[:45] + "..." if len(first) > 45 else first
+                if len(text) < 35:
+                    continue
+                
+                text = re.sub(r'https?://\S+|www\.\S+', '', text)
+                text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co|me|site)\b', '', text)
+                text = re.sub(r't\.me/\S+', '', text)
+                text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Protected]', text)
+                text = re.sub(r' +', ' ', text).strip()
+                
+                first_line = text.split('\n')[0].strip()
+                title = first_line[:45] + "..." if len(first_line) > 45 else first_line
+                if not title or len(title) < 5:
+                    title = text[:45] + "..."
                 
                 existing = JobNotification.query.filter_by(text=text).first()
-                if not existing and len(text) > 30:
+                if not existing and text:
                     db.session.add(JobNotification(source="JOB UPDATE", title=title, text=text))
             db.session.commit()
         except Exception:
             db.session.rollback()
             continue
 
+    # డేటాబేస్ లోని మొత్తం సమాచారాన్ని (గత వారం నుండి ఇప్పటిదాకా ఉన్నవన్నీ) ఆర్డర్ లో పంపుతుంది
     return JobNotification.query.order_by(JobNotification.created_at.desc()).all()
 
 # ----------------------------------------
@@ -198,7 +213,7 @@ HTML_HEADER = """
         #sidebar-left ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
         
         #sidebar-right { min-width: 310px; max-width: 310px; background: #fff; min-height: calc(100vh - 56px); padding: 20px 12px; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e2e8f0; }
-        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: all 0.2s; }
         #sidebar-right .job-link:hover { background: #fff3cd; color: #b45309; transform: translateX(3px); }
         
         #content { flex-grow: 1; padding: 30px; min-height: calc(100vh - 56px); background: #f8fafc; }
@@ -220,6 +235,7 @@ HTML_HEADER = """
 </nav>
 
 <div class="wrapper">
+    <!-- 🗂️ ఎడమ వైపు మెనూ బార్ -->
     <nav id="sidebar-left">
         <div class="menu-header text-center">🏢 SLNS Services</div>
         <ul class="list-unstyled components m-0 p-0">
@@ -240,14 +256,14 @@ HTML_HEADER = """
 HTML_FOOTER = """
     </div> <!-- content closing -->
 
-    <!-- 💼 కుడివైపు మెనూ బార్: Load More ఫీచర్ తో -->
+    <!-- 💼 కుడివైపు మెనూ బార్: డైనమిక్ AJAX లోడింగ్ బార్ -->
     <nav id="sidebar-right">
         <h5 class="text-dark font-weight-bold mb-3 pb-2" style="border-bottom: 2px solid #ffc107;"><i class="fas fa-briefcase text-warning me-2"></i> Job Notifications</h5>
-        <p class="text-muted" style="font-size: 11px;">తాజా అప్‌డేట్స్ కింద ప్రదర్శించబడుతున్నాయి.</p>
+        <p class="text-muted" style="font-size: 11px;">తాజా ఉద్యోగ సమాచారం కింద ప్రదర్శించబడుతోంది.</p>
         
         <div id="jobs-container" style="max-height: 550px; overflow-y: auto; padding-right:5px;">
             <p class="text-muted text-center py-3" id="jobs-loading-status">
-                <i class="fas fa-sync fa-spin me-1"></i> అప్‌డేట్స్ లోడ్ అవుతున్నాయి...
+                <i class="fas fa-sync fa-spin me-1"></i> తాజా నోటిఫికేషన్లు లోడ్ అవుతున్నాయి...
             </p>
         </div>
         <!-- 🔄 Load More బటన్ ఆప్షన్ -->
@@ -265,44 +281,42 @@ HTML_FOOTER = """
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
-<!-- 🧠 Load More & AJAX జావాస్క్రిప్ట్ ఇంజన్ -->
+<!-- 🧠 అప్‌గ్రేడెడ్ AJAX ఇంజిన్ స్క్రిప్ట్ -->
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     let allJobs = [];
     let displayedCount = 0;
-    const itemsPerPage = 5; // ఒకేసారి 5 వార్తలు మాత్రమే చూపిస్తుంది
+    const itemsPerPage = 5; // ఒకేసారి 5 వార్తలు మాత్రమే లోడ్ అవుతాయి
 
     const container = document.getElementById('jobs-container');
     const modalsContainer = document.getElementById('modals-container');
     const loadMoreBtn = document.getElementById('load-more-btn');
 
-    // API ద్వారా సింక్ అయిన డేటాని తెచ్చుకోవడం
     fetch('/api/jobs')
         .then(response => response.json())
         .then(data => {
             allJobs = data;
-            container.innerHTML = ''; // లోడింగ్ స్టేటస్ క్లియర్ చేయడం
+            container.innerHTML = ''; 
             
             if(!allJobs || allJobs.length === 0) {
-                container.innerHTML = '<p class="text-muted text-center py-2">గడిచిన 24 గంటల్లో ఎటువంటి కొత్త అప్‌డేట్స్ లేవు.</p>';
+                container.innerHTML = '<p class="text-muted text-center py-2">సమాచారం అందుబాటులో లేదు. దయచేసి కొద్దిసేపటి తర్వాత రీఫ్రెష్ చేయండి.</p>';
                 return;
             }
             
-            renderNextJobs(); // ఫస్ట్ 5 జాబ్స్ రెండర్ చేయడం
+            renderNextJobs(); 
             
             if (allJobs.length > itemsPerPage) {
-                loadMoreBtn.style.display = 'block'; // బటన్ ని చూపించడం
+                loadMoreBtn.style.display = 'block'; 
             }
         })
         .catch(error => {
-            container.innerHTML = '<p class="text-danger text-center py-2">సమాచారం లోడ్ చేయడంలో లోపం జరిగింది.</p>';
+            container.innerHTML = '<p class="text-muted text-center py-2">తాజా సమాచారం సింక్ అవుతోంది. దయచేసి పేజీని రీఫ్రెష్ చేయండి.</p>';
         });
 
     function renderNextJobs() {
         const nextSet = allJobs.slice(displayedCount, displayedCount + itemsPerPage);
         
         nextSet.forEach(job => {
-            // 1. లింక్ జోడించడం
             const jobLink = document.createElement('a');
             jobLink.href = "#";
             jobLink.className = "job-link";
@@ -313,11 +327,10 @@ document.addEventListener("DOMContentLoaded", function() {
                     <span class="badge bg-warning text-dark text-uppercase" style="font-size:9px; padding:2px 5px; font-weight:700;">JOB UPDATE</span>
                     <span class="text-muted" style="font-size:10px;"><i class="far fa-clock"></i> ${job.time_str}</span>
                 </div>
-                <div style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;">${job.title}</div>
+                <div style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; font-weight:600;">${job.title}</div>
             `;
             container.appendChild(jobLink);
             
-            // 2. పాప్-అప్ బాక్స్ జోడించడం
             const modalDiv = document.createElement('div');
             modalDiv.className = "modal fade";
             modalDiv.id = `jobModal${job.id}`;
@@ -349,14 +362,11 @@ document.addEventListener("DOMContentLoaded", function() {
         });
 
         displayedCount += nextSet.length;
-        
-        // అన్ని లోడ్ అయిపోతే బటన్ దాచేయడం
         if (displayedCount >= allJobs.length) {
             loadMoreBtn.style.display = 'none';
         }
     }
 
-    // Load More బటన్ క్లిక్ ఈవెంట్ లిజనర్
     loadMoreBtn.addEventListener('click', function() {
         renderNextJobs();
     });
@@ -464,11 +474,21 @@ INDEX_CONTENT = """
     </div>
 </div>
 
+<!-- 🏢 top insurance partners -->
+<div class="row mt-5 mb-4 text-center">
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🛡️ TATA AIA Life</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🚗 TATA AIG Gen</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">📈 Bajaj Allianz</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🩺 Niva Bupa</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🏠 HDFC ERGO</div></div>
+    <div class="col-6 col-md-2 mb-3"><div class="brand-logo-card">🚙 ICICI Lombard</div></div>
+</div>
+
 <!-- 📊 LIVE VISITOR COUNTER SECTION -->
 <div class="row mt-4 mb-2 justify-content-center">
     <div class="col-md-6">
         <div class="visitor-counter-box">
-            <span>📊 Analytics Counter</span>
+            <span>📊 Traffic Counter</span>
             <div class="d-flex justify-content-around mt-2 pt-2" style="border-top: 1px solid rgba(255,255,255,0.2);">
                 <div>📅 Today: <span class="badge bg-warning text-dark">{{ stats.today_count }}</span></div>
                 <div>🗓️ Month: <span class="badge bg-info text-white">{{ stats.month_count }}</span></div>
@@ -480,7 +500,7 @@ INDEX_CONTENT = """
 """
 
 # ----------------------------------------
-# 🚀 అప్లికేషన్ రూట్స్ (Routes)
+# 🚀 రోడ్స్ & API కంట్రోలర్స్
 # ----------------------------------------
 
 @app.route('/')
@@ -502,7 +522,7 @@ def index():
     }
     return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, stats=stats)
 
-# 🌐 జవాబు ఇచ్చే హై-స్పీడ్ బ్యాకెండ్ API రూట్ (Load More సపోర్ట్ తో)
+# 🌐 హై-స్పీడ్ బ్యాకెండ్ API రూట్ (ఫోర్స్ సింకింగ్ మోడ్‌తో)
 @app.route('/api/jobs')
 def get_jobs_api():
     jobs = sync_and_clean_jobs()
