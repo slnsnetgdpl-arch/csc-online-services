@@ -102,11 +102,11 @@ class JobNotification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 # ----------------------------------------
-# 🔍 100% సేఫ్ & ఫాస్ట్ డేటా సింకింగ్ ఫంక్షన్
+# 🔍 ఫిక్స్డ్: పక్కాగా ఒరిజినల్ డేటా తెచ్చే ఫంక్షన్
 # ----------------------------------------
 def sync_and_clean_jobs():
-    # 45 రోజుల పాత నోటిఫికేషన్లు క్లీన్ చేయడం
     try:
+        # 45 రోజుల పాత నోటిఫికేషన్లు క్లీన్ చేయడం
         time_threshold = datetime.now() - timedelta(days=45)
         JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
         db.session.commit()
@@ -114,38 +114,48 @@ def sync_and_clean_jobs():
         db.session.rollback()
 
     channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
+    
+    # గూగుల్ క్రోమ్ బ్రౌజర్ లాగా అభ్యర్థన పంపే హెడర్స్
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
     }
     
     for channel in channels:
         try:
-            url = f"https://tg.ihtw.site/s/{channel}"
+            # నేరుగా అఫీషియల్ టెలిగ్రామ్ పబ్లిక్ ఎంబెడ్ ఛానెల్ ఫీడ్ వాడకం
+            url = f"https://t.me/s/{channel}"
             req = urllib.request.Request(url, headers=headers)
             html = urllib.request.urlopen(req, timeout=3).read().decode('utf-8')
-            messages = re.findall(r'<div class="tgme_widget_message_text[^">]*">(.*?)</div>', html, re.DOTALL)
             
-            for msg in messages[:2]:
-                text = re.sub(r'<br\s*/?>', '\n', msg)
+            # టెలిగ్రామ్ లేటెస్ట్ HTML ట్యాగ్స్ మ్యాచ్ అయ్యేలా ఫిక్స్ చేసిన రీజెక్స్ (Regex)
+            messages = re.findall(r'<div class="tgme_widget_message_text[^">]*"([^>]*)>(.*?)</div>', html, re.DOTALL)
+            
+            for msg_match in messages[:3]:
+                msg_content = msg_match[1] # అసలైన టెక్స్ట్ సమాచారం
+                
+                text = re.sub(r'<br\s*/?>', '\n', msg_content)
                 text = re.sub(r'<[^>]*>', '', text)
                 text = text.replace('&amp;', '&').replace('&quot;', '"').replace('&apos;', "'").strip()
                 
-                if len(text) < 30:
+                if len(text) < 35:
                     continue
                 
-                # 🚫 ప్రొటెక్టెడ్ ఫిల్టర్స్
+                # 🚫 ప్రొటెక్టెడ్ ఫిల్టర్స్ (లింకులు మరియు ఫోన్ నంబర్లు డిలీట్)
                 text = re.sub(r'https?://\S+|www\.\S+', '', text)
-                text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co)\b', '', text)
+                text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co|me|site)\b', '', text)
                 text = re.sub(r't\.me/\S+', '', text)
                 text = re.sub(r'\b\d{10}\b|\b\d{5}[-\s]\d{5}\b', '[Protected]', text)
                 text = re.sub(r' +', ' ', text).strip()
                 
-                title = text.split('\n')[0][:40] + "..." if len(text.split('\n')[0]) > 40 else text.split('\n')[0]
-                if not title:
+                # మొదటి లైన్ ని టైటిల్ లాగా మార్చడం
+                first_line = text.split('\n')[0].strip()
+                title = first_line[:40] + "..." if len(first_line) > 40 else first_line
+                if not title or len(title) < 5:
                     title = text[:40] + "..."
                 
                 existing = JobNotification.query.filter_by(text=text).first()
-                if not existing and text:
+                if not existing and text and "[Protected]" not in title:
                     new_job = JobNotification(source=channel.upper(), title=title, text=text)
                     db.session.add(new_job)
             db.session.commit()
@@ -153,12 +163,13 @@ def sync_and_clean_jobs():
             db.session.rollback()
             continue
 
-    # ఒకవేళ టెలిగ్రామ్ మిర్రర్ నెమ్మదించినా లోడింగ్ ఆగకుండా డేటాబేస్ లో ఉన్న పాత వివరాలు చూపిస్తుంది
+    # డేటాబేస్ లో ఉన్న పోస్టులను క్రమపద్ధతిలో పంపడం
     all_jobs = JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
+    
     if not all_jobs:
-        # బ్యాకప్ డేటా - ఖాళీగా ఉంచకుండా వెంటనే ప్రదర్శిస్తుంది
+        # ఒకవేళ ఫస్ట్ టైం ఖాళీగా ఉంటే కస్టమర్ కి కనిపించే తాత్కాలిక సమాచారం
         return [
-            JobNotification(id=1, source="SLNS INFO", title="జాబ్ నోటిఫికేషన్స్ లైవ్ అప్‌డేట్ అవుతున్నాయి...", text="తెలంగాణ మరియు కేంద్ర ప్రభుత్వ ఉద్యోగాల తాజా సమాచారం ఇక్కడ ఆటోమేటిక్‌గా లోడ్ అవుతుంది. దయచేసి కొద్దిసేపటి తర్వాత పేజీని రీఫ్రెష్ చేయండి.", created_at=datetime.now())
+            JobNotification(id=1, source="SLNS INFO", title="జాబ్ నోటిఫికేషన్స్ అప్‌డేట్ అవుతున్నాయి...", text="తాజా విద్యా మరియు ఉద్యోగ సమాచారం ఇక్కడ ఆటోమేటిక్‌గా లోడ్ అవుతుంది. దయచేసి 1 నిమిషం తర్వాత పేజీని రీఫ్రెష్ చేయండి.", created_at=datetime.now())
         ]
     return all_jobs
 
@@ -191,7 +202,7 @@ HTML_HEADER = """
         #sidebar-left ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
         
         #sidebar-right { min-width: 300px; max-width: 300px; background: #fff; min-height: calc(100vh - 56px); padding: 20px 12px; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e2e8f0; }
-        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+        #sidebar-right .job-link { display: block; padding: 12px; margin-bottom: 10px; background: #f8fafc; border-left: 4px solid #ffc107; color: #1e293b; text-decoration: none; border-radius: 0 6px 6px 0; font-size: 13.5px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: all 0.2s; }
         #sidebar-right .job-link:hover { background: #fff3cd; color: #b45309; transform: translateX(3px); }
         
         #content { flex-grow: 1; padding: 30px; min-height: calc(100vh - 56px); background: #f8fafc; }
@@ -634,7 +645,6 @@ def index():
         'total_count': total_count if total_count > 0 else 1
     }
 
-    # 🔗 అల్ట్రా-ఫాస్ట్ సింకింగ్ బాక్స్
     jobs = sync_and_clean_jobs()
     return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, job_updates=jobs, stats=stats)
 
@@ -740,7 +750,7 @@ def request_life():
     flash("Life Insurance inquiry submitted successfully!")
     return redirect(url_for('index'))
 
-# 🔒 అడ్మిన్ లాగిన్ & డాష్‌బోర్డ్ సెక్షన్ (ఫిక్స్డ్ రూట్)
+# 🔒 అడ్మిన్ లాగిన్ & డాష్‌బోర్డ్ సెక్షన్
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -820,7 +830,6 @@ def dashboard():
         <div class="mt-4"><a href="/" class="btn btn-secondary btn-sm">← Back to Main Web Portal</a></div>
     </div>
     """
-    # ఇక్కడ పాత రిటర్న్ టైప్ తప్పును సరిదిద్ది హెడర్/ఫుటర్ లూప్ లేకుండా క్లీన్ చేశాను
     return render_template_string('<!DOCTYPE html><html><head><title>Dashboard</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"></head><body class="bg-light">' + DASHBOARD_CONTENT + '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script></body></html>', pans=pans, addresses=addresses, birth_pans=birth_pans, health_reqs=health_reqs, vehicle_reqs=vehicle_reqs, life_reqs=life_reqs)
 
 if __name__ == '__main__':
