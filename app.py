@@ -1,19 +1,26 @@
 import os
+from datetime import datetime
 from flask import Flask, render_template_string, request, redirect, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-# Render లో డేటాబేస్ ఫైల్ సేవ్ అవ్వడానికి సెటప్
 basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'instance', 'database.db')
+
+# డేటాబేస్ పాత్ సెటప్
+db_path = os.path.join(basedir, 'instance', 'database.db')
+db_dir = os.path.dirname(db_path)
+if not os.path.exists(db_dir):
+    os.makedirs(db_dir)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + db_path
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = "slns_secret_admin_key"
 
 db = SQLAlchemy(app)
 
 # 📁 అప్‌లోడ్ ఫోల్డర్ సెటప్
-UPLOAD_FOLDER = 'uploads'
+UPLOAD_FOLDER = os.path.join(basedir, 'uploads')
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -30,7 +37,7 @@ class PanApplication(db.Model):
     aadhaar_num = db.Column(db.String(20), nullable=False)
     mobile_num = db.Column(db.String(20), nullable=False)
     dob = db.Column(db.String(20), nullable=False)
-    timestamp = db.Column(db.DateTime, default=db.datetime.utcnow if hasattr(db, 'datetime') else None)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 class AddressUpdateApplication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -38,7 +45,7 @@ class AddressUpdateApplication(db.Model):
     aadhaar_num = db.Column(db.String(20), nullable=False)
     mobile_num = db.Column(db.String(20), nullable=False)
     address = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=db.datetime.utcnow if hasattr(db, 'datetime') else None)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 class PanWithBirthApplication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -53,7 +60,7 @@ class PanWithBirthApplication(db.Model):
     signature_filename = db.Column(db.String(100))
     aadhaar_filename = db.Column(db.String(100))
     birth_proof_filename = db.Column(db.String(100))
-    timestamp = db.Column(db.DateTime, default=db.datetime.utcnow if hasattr(db, 'datetime') else None)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ----------------------------------------
 # 🎨 HTML లేఅవుట్ టెంప్లేట్స్ (UI Design)
@@ -362,7 +369,6 @@ def dashboard():
     addresses = AddressUpdateApplication.query.all()
     birth_pans = PanWithBirthApplication.query.all()
 
-    # సింపుల్ డాష్‌బోర్డ్ UI టేబుల్స్ డేటా ప్రదర్శించడానికి
     DASHBOARD_CONTENT = """
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>🔒 SLNS Admin Dashboard</h2>
@@ -376,7 +382,6 @@ def dashboard():
     </ul>
     
     <div class="tab-content bg-white p-3 border border-top-0 rounded-bottom">
-      <!-- Tab 1 -->
       <div class="tab-pane fade show active" id="tab1">
         <table class="table table-striped mt-2">
             <thead><tr><th>Name</th><th>Father Name</th><th>Aadhaar [Omitted]</th><th>Mobile</th><th>DOB</th></tr></thead>
@@ -387,7 +392,6 @@ def dashboard():
             </tbody>
         </table>
       </div>
-      <!-- Tab 2 -->
       <div class="tab-pane fade" id="tab2">
         <table class="table table-striped mt-2">
             <thead><tr><th>Voter ID</th><th>Aadhaar [Omitted]</th><th>Mobile</th><th>Address</th></tr></thead>
@@ -398,7 +402,6 @@ def dashboard():
             </tbody>
         </table>
       </div>
-      <!-- Tab 3 -->
       <div class="tab-pane fade" id="tab3">
         <table class="table table-striped mt-2">
             <thead><tr><th>Candidate</th><th>Father</th><th>Proof Type</th><th>Aadhaar [Omitted]</th><th>Files</th></tr></thead>
@@ -426,12 +429,8 @@ def dashboard():
     """
     return render_template_string(HTML_HEADER + DASHBOARD_CONTENT + HTML_FOOTER, pans=pans, addresses=addresses, birth_pans=birth_pans)
 
-# ----------------------------------------
-# ⚙️ సర్వర్ రన్ సెటప్ (Render Port Auto Binding)
-# ----------------------------------------
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
