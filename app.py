@@ -94,7 +94,6 @@ class VisitorLog(db.Model):
     visit_date = db.Column(db.Date, default=date.today)
     visit_month = db.Column(db.String(7), default=lambda: datetime.now().strftime('%Y-%m'))
 
-# 📋 జాబ్ నోటిఫికేషన్స్ కొరకు ప్రత్యేక టేబుల్ (డేట్ & టైమ్ ట్రాకింగ్ కొరకు)
 class JobNotification(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     source = db.Column(db.String(50), nullable=False)
@@ -103,22 +102,28 @@ class JobNotification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 # ----------------------------------------
-# 🔍 టెలిగ్రామ్ డేటా సింక్, ఫిల్టర్ & ఆటో-డిలీట్ ఫంక్షన్
+# 🔍 సూపర్ ఫాస్ట్ టెలిగ్రామ్ సింక్ & క్లీన్ ఫంక్షన్
 # ----------------------------------------
 def sync_and_clean_jobs():
-    # 🛑 1. ఆటో-డిలీట్ రూల్: 45 రోజుల కంటే పాత నోటిఫికేషన్లను డేటాబేస్ నుండి తొలగించడం
+    # 45 రోజుల కంటే పాత నోటిఫికేషన్లను క్లీన్ చేయడం
     time_threshold = datetime.now() - timedelta(days=45)
     JobNotification.query.filter(JobNotification.created_at < time_threshold).delete()
     db.session.commit()
 
-    # 📡 2. టెలిగ్రామ్ ఛానెల్స్ నుండి కొత్త సమాచారాన్ని సేకరించడం
     channels = ['bikkinews', 'studybizz', 'tspsc_world', 'Telangana_Jobs', 'eLearningBADI', 'vidyarthinestam']
+    
+    # టెలిగ్రామ్ బ్లాక్ చేయకుండా ఉండటానికి ప్రొఫెషనల్ డెస్క్‌టాప్ హెడర్స్
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
+    }
     
     for channel in channels:
         try:
             url = f"https://t.me/s/{channel}"
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            html = urllib.request.urlopen(req, timeout=5).read().decode('utf-8')
+            req = urllib.request.Request(url, headers=headers)
+            html = urllib.request.urlopen(req, timeout=2).read().decode('utf-8') # 2 సెకన్ల టైమౌట్
             messages = re.findall(r'<div class="tgme_widget_message_text[^">]*">(.*?)</div>', html, re.DOTALL)
             
             for msg in messages[:3]:
@@ -128,7 +133,7 @@ def sync_and_clean_jobs():
                 if len(text) < 40:
                     continue
                 
-                # 🚫 లింకులు మరియు ఫోన్ నంబర్ల ఫిల్టర్
+                # 🚫 ప్రొటెక్టెడ్ ఫిల్టర్స్ (లింకులు & నంబర్స్ డిలీట్)
                 text = re.sub(r'https?://\S+|www\.\S+', '', text)
                 text = re.sub(r'\S+\.(com|in|net|org|info|edu|gov|xyz|co)\b', '', text)
                 text = re.sub(r't\.me/\S+', '', text)
@@ -137,7 +142,6 @@ def sync_and_clean_jobs():
                 
                 title = text[:45] + "..." if len(text) > 45 else text
                 
-                # డూప్లికేట్ కాకుండా చూసుకోవడం
                 existing = JobNotification.query.filter_by(text=text).first()
                 if not existing and text:
                     new_job = JobNotification(source=channel.upper(), title=title, text=text)
@@ -146,7 +150,6 @@ def sync_and_clean_jobs():
         except Exception:
             continue
 
-    # 🔄 3. లేటెస్ట్ పోస్టింగ్స్ పైన వచ్చేలా అమర్చి పంపడం (Order by created_at DESC)
     return JobNotification.query.order_by(JobNotification.created_at.desc()).limit(15).all()
 
 # ----------------------------------------
@@ -250,10 +253,10 @@ HTML_HEADER = """
 HTML_FOOTER = """
     </div> <!-- content closing -->
 
-    <!-- 💼 కుడివైపు మెనూ బార్: జాబ్ నోటిఫికేషన్స్ లింకులు (Posting Time తో సహా) -->
+    <!-- 💼 కుడివైపు మెనూ బార్: జాబ్ నోటిఫికేషన్స్ లింకులు -->
     <nav id="sidebar-right">
         <h5 class="text-dark font-weight-bold mb-3 pb-2" style="border-bottom: 2px solid #ffc107;"><i class="fas fa-briefcase text-warning me-2"></i> Job Notifications</h5>
-        <p class="text-muted" style="font-size: 11px;">లేటెస్ట్ అప్‌డేట్స్ పైన ఉంటాయి. క్లిక్ చేసి పాప్-అప్ బాక్స్ లో పూర్తి వివరాలు చూడండి.</p>
+        <p class="text-muted" style="font-size: 11px;">లేటెస్ట్ అప్‌డేట్స్ పైన ఉంటాయి. క్లిక్ చేసి పూర్తి వివరాలు చూడండి.</p>
         
         <div style="max-height: 650px; overflow-y: auto;">
             {% if job_updates %}
@@ -619,7 +622,7 @@ def index():
         'total_count': total_count if total_count > 0 else 1
     }
 
-    # 🔄 జాబ్స్ ఆటో-డిలీట్ మరియు లైవ్ టెలిగ్రామ్ సింకింగ్ రన్ అవుతుంది
+    # ఆటో-క్లీన్ రూల్ & నెట్‌వర్క్-ఆప్టిమైజ్డ్ టెలిగ్రామ్ సింకింగ్ రన్ అవుతుంది
     jobs = sync_and_clean_jobs()
     return render_template_string(HTML_HEADER + INDEX_CONTENT + HTML_FOOTER, job_updates=jobs, stats=stats)
 
@@ -725,7 +728,7 @@ def request_life():
     flash("Life Insurance inquiry submitted successfully!")
     return redirect(url_for('index'))
 
-# 🔒 అడ్మిన్ లాగిన్
+# 🔒 అడ్మిన్ లాగిన్ & డాష్‌బోర్డ్ సెక్షన్
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -754,6 +757,7 @@ def logout():
 def dashboard():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
+    
     pans = PanApplication.query.all()
     addresses = AddressUpdateApplication.query.all()
     birth_pans = PanWithBirthApplication.query.all()
@@ -801,7 +805,7 @@ def dashboard():
       </div>
     </div>
     """
-    return render_template_string(DASHBOARD_CONTENT)
+    return render_template_string(HTML_HEADER + DASHBOARD_CONTENT + HTML_FOOTER, job_updates=JobNotification.query.all(), stats={'today_count':1,'month_count':1,'total_count':1})
 
 if __name__ == '__main__':
     with app.app_context():
