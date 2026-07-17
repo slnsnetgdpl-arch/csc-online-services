@@ -62,6 +62,30 @@ class PanWithBirthApplication(db.Model):
     birth_proof_filename = db.Column(db.String(100))
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
+class HealthInsuranceRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    full_name = db.Column(db.String(100), nullable=False)
+    mobile_num = db.Column(db.String(20), nullable=False)
+    age = db.Column(db.Integer, nullable=False)
+    medical_history = db.Column(db.Text)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+class VehicleInsuranceRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    full_name = db.Column(db.String(100), nullable=False)
+    mobile_num = db.Column(db.String(20), nullable=False)
+    vehicle_number = db.Column(db.String(50), nullable=False)
+    vehicle_type = db.Column(db.String(50), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+class LifeInsuranceRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    full_name = db.Column(db.String(100), nullable=False)
+    mobile_num = db.Column(db.String(20), nullable=False)
+    dob = db.Column(db.String(20), nullable=False)
+    coverage_amount = db.Column(db.String(50), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
 # ----------------------------------------
 # 🎨 HTML లేఅవుట్ టెంప్లేట్స్ (UI Design)
 # ----------------------------------------
@@ -74,10 +98,12 @@ HTML_HEADER = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SLNS Online & Insurance Services</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         body { background: #f0f4f8; font-family: 'Segoe UI', sans-serif; color: #333; position: relative; min-height: 100vh; }
         .navbar { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364) !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .card { box-shadow: 0 4px 8px rgba(0,0,0,0.05); border: none; margin-bottom: 25px; }
+        .card { box-shadow: 0 4px 8px rgba(0,0,0,0.05); border: none; margin-bottom: 25px; transition: transform 0.2s; }
+        .card:hover { transform: translateY(-3px); }
         .form-label { font-weight: 600; }
         .note-box { color: #b58900; background: #fff3cd; padding: 10px; border-radius: 5px; font-size: 14px; border-left: 4px solid #ffc107; }
         .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25d366; color: white; padding: 12px 20px; border-radius: 30px; font-weight: bold; text-decoration: none; box-shadow: 0 4px 10px rgba(0,0,0,0.2); z-index: 9999; transition: transform 0.2s; }
@@ -129,7 +155,7 @@ INDEX_CONTENT = """
     <!-- ఫారమ్ 1: PAN Card Service Standard -->
     <div class="col-md-6">
         <div class="card p-4">
-            <h4 class="text-primary mb-3"> 1. PAN Card Service Application</h4>
+            <h4 class="text-primary mb-3">📝 1. PAN Card Service Application</h4>
             <form action="/apply-pan" method="POST">
                 <div class="mb-3">
                     <label class="form-label">A. Full Name of the Person</label>
@@ -262,6 +288,110 @@ INDEX_CONTENT = """
         </div>
     </div>
 </div>
+
+<!-- 🛡️ INSURANCE SERVICES SECTION -->
+<div class="row mt-5">
+    <div class="col-12 text-center mb-4">
+        <h2 style="color: #2c5364; font-weight: 700; border-bottom: 3px solid #203a43; display: inline-block; padding-bottom: 10px;">🛡️ Insurance Customer Request Forms</h2>
+        <p class="text-muted">మీకు కావలసిన ఇన్సూరెన్స్ వివరాలను ఇక్కడ నమోదు చేయండి. మేము మిమ్మల్ని సంప్రదిస్తాము.</p>
+    </div>
+
+    <!-- 1. Health Insurance Form -->
+    <div class="col-md-4 mb-4">
+        <div class="card p-4 h-100" style="border-top: 5px solid #00d2ff;">
+            <div class="text-center mb-3">
+                <i class="fas fa-heartbeat" style="font-size: 45px; color: #00d2ff;"></i>
+                <h4 class="mt-2" style="color: #333; font-weight: 600;">Health Insurance</h4>
+            </div>
+            <form action="/request-health-insurance" method="POST">
+                <div class="mb-3">
+                    <label class="form-label">Full Name</label>
+                    <input type="text" name="full_name" class="form-control" placeholder="మీ పూర్తి పేరు" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Mobile Number</label>
+                    <input type="tel" name="mobile_num" class="form-control" placeholder="మొబైల్ నంబర్" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Age of Applicant</label>
+                    <input type="number" name="age" class="form-control" placeholder="వయస్సు" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Previous Medical History (If any)</label>
+                    <textarea name="medical_history" class="form-control" rows="2" placeholder="ఆరోగ్య సమస్యలు ఉంటే రాయండి..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-info text-white w-100 py-2">Get Health Quote</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 2. Vehicle Insurance Form -->
+    <div class="col-md-4 mb-4">
+        <div class="card p-4 h-100" style="border-top: 5px solid #ff416c;">
+            <div class="text-center mb-3">
+                <i class="fas fa-car" style="font-size: 45px; color: #ff416c;"></i>
+                <h4 class="mt-2" style="color: #333; font-weight: 600;">Vehicle Insurance</h4>
+            </div>
+            <form action="/request-vehicle-insurance" method="POST">
+                <div class="mb-3">
+                    <label class="form-label">Full Name</label>
+                    <input type="text" name="full_name" class="form-control" placeholder="మీ పూర్తి పేరు" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Mobile Number</label>
+                    <input type="tel" name="mobile_num" class="form-control" placeholder="మొబైల్ నంబర్" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Vehicle Type</label>
+                    <select name="vehicle_type" class="form-select" required>
+                        <option value="">-- Select Type --</option>
+                        <option value="Two Wheeler">Two Wheeler (బైక్ / స్కూటర్)</option>
+                        <option value="Four Wheeler">Four Wheeler (కారు / ఆటో / ట్రాక్టర్)</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Vehicle Registration Number</label>
+                    <input type="text" name="vehicle_number" class="form-control" placeholder="e.g., TS04XX1234" required>
+                </div>
+                <button type="submit" class="btn btn-danger w-100 py-2" style="background: #ff416c; border: none;">Get Vehicle Quote</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 3. Life Insurance Form -->
+    <div class="col-md-4 mb-4">
+        <div class="card p-4 h-100" style="border-top: 5px solid #ffb199;">
+            <div class="text-center mb-3">
+                <i class="fas fa-umbrella" style="font-size: 45px; color: #ffb199;"></i>
+                <h4 class="mt-2" style="color: #333; font-weight: 600;">Life Insurance</h4>
+            </div>
+            <form action="/request-life-insurance" method="POST">
+                <div class="mb-3">
+                    <label class="form-label">Full Name</label>
+                    <input type="text" name="full_name" class="form-control" placeholder="మీ పూర్తి పేరు" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Mobile Number</label>
+                    <input type="tel" name="mobile_num" class="form-control" placeholder="మొబైల్ నంబర్" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Date of Birth</label>
+                    <input type="date" name="dob" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Required Policy Term/Coverage</label>
+                    <select name="coverage_amount" class="form-select" required>
+                        <option value="">-- Select Coverage --</option>
+                        <option value="5 Lakhs">₹5 Lakhs Coverage</option>
+                        <option value="10 Lakhs">₹10 Lakhs Coverage</option>
+                        <option value="20 Lakhs+">₹20 Lakhs+ Coverage</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn w-100 py-2 text-white" style="background: #ffb199; border: none;">Get Life Quote</button>
+            </form>
+        </div>
+    </div>
+</div>
 """
 
 # ----------------------------------------
@@ -335,6 +465,45 @@ def apply_pan_birth():
     flash("PAN Application with Birth Proof submitted successfully! Fee of ₹299 received.")
     return redirect(url_for('index'))
 
+@app.route('/request-health-insurance', methods=['POST'])
+def request_health():
+    new_req = HealthInsuranceRequest(
+        full_name=request.form.get('full_name'),
+        mobile_num=request.form.get('mobile_num'),
+        age=request.form.get('age'),
+        medical_history=request.form.get('medical_history')
+    )
+    db.session.add(new_req)
+    db.session.commit()
+    flash("Health Insurance inquiry submitted successfully! We will contact you soon.")
+    return redirect(url_for('index'))
+
+@app.route('/request-vehicle-insurance', methods=['POST'])
+def request_vehicle():
+    new_req = VehicleInsuranceRequest(
+        full_name=request.form.get('full_name'),
+        mobile_num=request.form.get('mobile_num'),
+        vehicle_type=request.form.get('vehicle_type'),
+        vehicle_number=request.form.get('vehicle_number')
+    )
+    db.session.add(new_req)
+    db.session.commit()
+    flash("Vehicle Insurance inquiry submitted successfully!")
+    return redirect(url_for('index'))
+
+@app.route('/request-life-insurance', methods=['POST'])
+def request_life():
+    new_req = LifeInsuranceRequest(
+        full_name=request.form.get('full_name'),
+        mobile_num=request.form.get('mobile_num'),
+        dob=request.form.get('dob'),
+        coverage_amount=request.form.get('coverage_amount')
+    )
+    db.session.add(new_req)
+    db.session.commit()
+    flash("Life Insurance inquiry submitted successfully!")
+    return redirect(url_for('index'))
+
 # ----------------------------------------
 # 🔒 సెక్యూర్ అడ్మిన్ లాగిన్ & డాష్‌బోర్డ్
 # ----------------------------------------
@@ -381,6 +550,9 @@ def dashboard():
     pans = PanApplication.query.all()
     addresses = AddressUpdateApplication.query.all()
     birth_pans = PanWithBirthApplication.query.all()
+    health_reqs = HealthInsuranceRequest.query.all()
+    vehicle_reqs = VehicleInsuranceRequest.query.all()
+    life_reqs = LifeInsuranceRequest.query.all()
 
     DASHBOARD_CONTENT = """
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -391,7 +563,8 @@ def dashboard():
     <ul class="nav nav-tabs" id="myTab" role="tablist">
       <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab1">Standard PAN</button></li>
       <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab2">Address Update</button></li>
-      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab3">PAN with Birth Proof</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab3">PAN with Birth</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab4">Insurance Inquiries</button></li>
     </ul>
     
     <div class="tab-content bg-white p-3 border border-top-0 rounded-bottom">
@@ -438,9 +611,32 @@ def dashboard():
             </tbody>
         </table>
       </div>
+      <div class="tab-pane fade" id="tab4">
+        <h5 class="mt-2 text-info">❤️ Health Insurance Requests</h5>
+        <table class="table table-sm table-bordered">
+            <thead><tr><th>Name</th><th>Mobile</th><th>Age</th><th>History</th></tr></thead>
+            <tbody>
+                {% for h in health_reqs %}<tr><td>{{h.full_name}}</td><td>{{h.mobile_num}}</td><td>{{h.age}}</td><td>{{h.medical_history}}</td></tr>{% endfor %}
+            </tbody>
+        </table>
+        <h5 class="mt-3 text-danger">🚗 Vehicle Insurance Requests</h5>
+        <table class="table table-sm table-bordered">
+            <thead><tr><th>Name</th><th>Mobile</th><th>Type</th><th>Vehicle No</th></tr></thead>
+            <tbody>
+                {% for v in vehicle_reqs %}<tr><td>{{v.full_name}}</td><td>{{v.mobile_num}}</td><td>{{v.vehicle_type}}</td><td>{{v.vehicle_number}}</td></tr>{% endfor %}
+            </tbody>
+        </table>
+        <h5 class="mt-3 text-warning">☂️ Life Insurance Requests</h5>
+        <table class="table table-sm table-bordered">
+            <thead><tr><th>Name</th><th>Mobile</th><th>DOB</th><th>Coverage</th></tr></thead>
+            <tbody>
+                {% for l in life_reqs %}<tr><td>{{l.full_name}}</td><td>{{l.mobile_num}}</td><td>{{l.dob}}</td><td>{{l.coverage_amount}}</td></tr>{% endfor %}
+            </tbody>
+        </table>
+      </div>
     </div>
     """
-    return render_template_string(HTML_HEADER + DASHBOARD_CONTENT + HTML_FOOTER, pans=pans, addresses=addresses, birth_pans=birth_pans)
+    return render_template_string(HTML_HEADER + DASHBOARD_CONTENT + HTML_FOOTER, pans=pans, addresses=addresses, birth_pans=birth_pans, health_reqs=health_reqs, vehicle_reqs=vehicle_reqs, life_reqs=life_reqs)
 
 if __name__ == '__main__':
     with app.app_context():
