@@ -100,19 +100,36 @@ HTML_HEADER = """
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { background: #f0f4f8; font-family: 'Segoe UI', sans-serif; color: #333; position: relative; min-height: 100vh; }
-        .navbar { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364) !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .card { box-shadow: 0 4px 8px rgba(0,0,0,0.05); border: none; margin-bottom: 25px; transition: transform 0.2s; }
+        body { background: #f0f4f8; font-family: 'Segoe UI', sans-serif; color: #333; min-height: 100vh; overflow-x: hidden; }
+        .navbar { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364) !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1030; }
+        .card { box-shadow: 0 4px 8px rgba(0,0,0,0.05); border: none; margin-bottom: 25px; transition: transform 0.2s; scroll-margin-top: 90px; }
         .card:hover { transform: translateY(-3px); }
         .form-label { font-weight: 600; }
         .note-box { color: #b58900; background: #fff3cd; padding: 10px; border-radius: 5px; font-size: 14px; border-left: 4px solid #ffc107; }
+        
+        /* సైడ్‌బార్ స్టైలింగ్ */
+        .wrapper { display: flex; width: 100%; align-items: stretch; }
+        #sidebar { min-width: 280px; max-width: 280px; background: linear-gradient(180deg, #0f2027, #203a43); color: #fff; transition: all 0.3s; min-height: calc(100vh - 56px); padding-top: 20px; box-shadow: 4px 0 10px rgba(0,0,0,0.1); }
+        #sidebar .sidebar-header { padding: 15px 20px; background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255,255,255,0.1); }
+        #sidebar ul.components { padding: 15px 0; }
+        #sidebar ul li a { padding: 12px 20px; font-size: 15px; display: block; color: rgba(255,255,255,0.8); text-decoration: none; transition: all 0.3s; font-weight: 500; }
+        #sidebar ul li a:hover { color: #fff; background: rgba(255,255,255,0.1); border-left: 4px solid #00d2ff; }
+        #sidebar ul li.active > a { color: #fff; background: rgba(255,255,255,0.15); border-left: 4px solid #00d2ff; }
+        
+        #content { width: 100%; padding: 30px; min-height: calc(100vh - 56px); }
+        
         .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25d366; color: white; padding: 12px 20px; border-radius: 30px; font-weight: bold; text-decoration: none; box-shadow: 0 4px 10px rgba(0,0,0,0.2); z-index: 9999; transition: transform 0.2s; }
         .whatsapp-float:hover { transform: scale(1.05); color: white; }
+        
+        @media (max-width: 991px) {
+            .wrapper { flex-direction: column; }
+            #sidebar { min-width: 100%; max-width: 100%; min-height: auto; }
+        }
     </style>
 </head>
 <body>
-<nav class="navbar navbar-dark navbar-expand-lg">
-    <div class="container">
+<nav class="navbar navbar-dark navbar-expand-lg sticky-top">
+    <div class="container-fluid px-4">
         <a class="navbar-brand font-weight-bold" href="/">🛡️ SLNS ONLINE & INSURANCE SERVICES</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
@@ -126,21 +143,55 @@ HTML_HEADER = """
         </div>
     </div>
 </nav>
-<div class="container my-5">
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        {% for message in messages %}
-          <div class="alert alert-success alert-dismissible fade show" role="alert">
-            {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-          </div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
+
+<div class="wrapper">
+    <!-- 🗂️ ఎడమ వైపు మెనూ బార్ (Left Side Menu Bar) -->
+    <nav id="sidebar">
+        <div class="sidebar-header text-center">
+            🏢 <h6 class="d-inline font-weight-bold">SLNS Services Menu</h6>
+        </div>
+        <ul class="list-unstyled components">
+            <li class="active">
+                <a href="#standard-pan"><i class="fas fa-file-alt me-2"></i> 1. Standard PAN Card</a>
+            </li>
+            <li>
+                <a href="#address-update"><i class="fas fa-home me-2"></i> 2. Aadhaar Address Update</a>
+            </li>
+            <li>
+                <a href="#birth-pan"><i class="fas fa-certificate me-2"></i> 3. PAN with Birth Proof</a>
+            </li>
+            <hr style="border-color: rgba(255,255,255,0.15); margin: 10px 0;">
+            <div class="px-3 py-1 text-info" style="font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">Insurance Services</div>
+            <li>
+                <a href="#health-insurance" style="color: #00d2ff;"><i class="fas fa-heartbeat me-2"></i> Health Insurance</a>
+            </li>
+            <li>
+                <a href="#vehicle-insurance" style="color: #ff416c;"><i class="fas fa-car me-2"></i> Vehicle Insurance</a>
+            </li>
+            <li>
+                <a href="#life-insurance" style="color: #ffb199;"><i class="fas fa-umbrella me-2"></i> Life Insurance</a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- 💻 కుడివైపు కంటెంట్ ఏరియా (Main Content Window) -->
+    <div id="content">
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            {% for message in messages %}
+              <div class="alert alert-success alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
 """
 
 HTML_FOOTER = """
-</div>
+    </div> <!-- content closing -->
+</div> <!-- wrapper closing -->
+
 <!-- వాట్సాప్ లైవ్ హెల్ప్ చాట్ విజెట్ -->
 <a href="https://wa.me/919390038979" target="_blank" class="whatsapp-float">
     📲 Live Help Chat
@@ -153,7 +204,7 @@ HTML_FOOTER = """
 INDEX_CONTENT = """
 <div class="row">
     <!-- ఫారమ్ 1: PAN Card Service Standard -->
-    <div class="col-md-6">
+    <div class="col-md-6" id="standard-pan">
         <div class="card p-4">
             <h4 class="text-primary mb-3">📝 1. PAN Card Service Application</h4>
             <form action="/apply-pan" method="POST">
@@ -187,7 +238,7 @@ INDEX_CONTENT = """
     </div>
 
     <!-- ఫారమ్ 2: Aadhaar Address Update -->
-    <div class="col-md-6">
+    <div class="col-md-6" id="address-update">
         <div class="card p-4">
             <h4 class="text-success mb-3">🏠 2. Aadhaar Address Update</h4>
             <form action="/update-address" method="POST">
@@ -214,7 +265,7 @@ INDEX_CONTENT = """
 </div>
 
 <!-- ఫారమ్ 3: PAN Card Apply with Birth Proof -->
-<div class="row mt-4">
+<div class="row mt-4" id="birth-pan">
     <div class="col-12">
         <div class="card p-4" style="border: 1px solid #0d6efd;">
             <h4 class="text-primary mb-3">📜 3. PAN Card Apply with Birth Proof <span class="badge bg-danger">Fee: ₹299</span></h4>
@@ -297,7 +348,7 @@ INDEX_CONTENT = """
     </div>
 
     <!-- 1. Health Insurance Form -->
-    <div class="col-md-4 mb-4">
+    <div class="col-md-4 mb-4" id="health-insurance">
         <div class="card p-4 h-100" style="border-top: 5px solid #00d2ff;">
             <div class="text-center mb-3">
                 <i class="fas fa-heartbeat" style="font-size: 45px; color: #00d2ff;"></i>
@@ -326,7 +377,7 @@ INDEX_CONTENT = """
     </div>
 
     <!-- 2. Vehicle Insurance Form -->
-    <div class="col-md-4 mb-4">
+    <div class="col-md-4 mb-4" id="vehicle-insurance">
         <div class="card p-4 h-100" style="border-top: 5px solid #ff416c;">
             <div class="text-center mb-3">
                 <i class="fas fa-car" style="font-size: 45px; color: #ff416c;"></i>
@@ -359,7 +410,7 @@ INDEX_CONTENT = """
     </div>
 
     <!-- 3. Life Insurance Form -->
-    <div class="col-md-4 mb-4">
+    <div class="col-md-4 mb-4" id="life-insurance">
         <div class="card p-4 h-100" style="border-top: 5px solid #ffb199;">
             <div class="text-center mb-3">
                 <i class="fas fa-umbrella" style="font-size: 45px; color: #ffb199;"></i>
